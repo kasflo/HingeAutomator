@@ -1,0 +1,1855 @@
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  Shield,
+  Phone,
+  MessageSquare,
+  Plus,
+  Search,
+  RefreshCw,
+  Copy,
+  Trash2,
+  Settings,
+  CheckCircle2,
+  AlertCircle,
+  Clock,
+  ExternalLink,
+  ChevronRight,
+  User,
+  MapPin,
+  Briefcase,
+  Lock,
+  Unlock,
+  LogOut,
+  UserPlus,
+  Mail,
+  Upload,
+  X,
+  LayoutDashboard,
+  Globe,
+  Crown,
+  UserCheck,
+  UserX,
+  Ban,
+  ShieldCheck,
+  Users,
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import axios from 'axios';
+import * as XLSX from 'xlsx';
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+import { ProxyConfig, ProxyResult, DaisySMSConfig, CityChoice } from './types';
+import { DaisySMSService, getNearbyPlaces, normalizeToken, buildUsername, stripToBaseUser } from './services/api';
+import { generateHingePrompts, JOB_TITLES } from './services/gemini';
+import { FALLBACK_BIG_US_CITIES } from './constants';
+
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+const DEFAULT_DAISY_KEY = "Xwcfb3FpxPOvCqwK1lQx5L5BzBtxZm";
+
+export default function App() {
+  // --- Auth State ---
+  const [user, setUser] = useState<string | null>(() => localStorage.getItem('auth_user'));
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authForm, setAuthForm] = useState({ username: '', password: '' });
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [emailCount, setEmailCount] = useState<number>(0);
+
+  // --- Main App State ---
+  const [proxyConfig, setProxyConfig] = useState<ProxyConfig>({
+    user: "",
+    pass: "",
+    isp: "Verizon",
+    count: 15,
+    attempts: 100,
+    timeout: 10,
+    workers: 30
+  });
+
+  const [daisyConfig, setDaisyConfig] = useState<DaisySMSConfig>({
+    apiKey: DEFAULT_DAISY_KEY,
+    service: "vz", // Hinge (vz as requested)
+    maxPrice: "0.25"
+  });
+
+  const [results, setResults] = useState<ProxyResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [generatingPromptsFor, setGeneratingPromptsFor] = useState<string | null>(null);
+  const [balance, setBalance] = useState<string | null>(null);
+  const [isCheckingBalance, setIsCheckingBalance] = useState(false);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [status, setStatus] = useState("Ready.");
+  const [selectedResult, setSelectedResult] = useState<ProxyResult | null>(null);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [currentView, setCurrentView] = useState<'dashboard' | 'emails' | 'admin'>('dashboard');
+  const [allEmails, setAllEmails] = useState<any[]>([]);
+
+  // --- Admin State ---
+  const [adminUsers, setAdminUsers] = useState<any[]>([]);
+  const [adminLoading, setAdminLoading] = useState(false);
+
+  // --- Helpers ---
+  const formatPhoneNumber = (num: string) => {
+    if (!num) return "";
+    // Expected: +1 223 246 9520
+    const cleaned = num.replace(/\D/g, '');
+    
+    // Handle numbers with or without leading '1'
+    let digits = cleaned;
+    if (cleaned.length === 11 && cleaned.startsWith('1')) {
+      digits = cleaned.substring(1);
+    }
+    
+    if (digits.length === 10) {
+      return `+1 ${digits.substring(0, 3)} ${digits.substring(3, 6)} ${digits.substring(6)}`;
+    }
+    
+    return num;
+  };
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    setStatus(`${label} copied!`);
+    setTimeout(() => setStatus("Ready."), 2000);
+  };
+
+  useEffect(() => {
+    if (user) {
+      fetchEmailCount();
+      loadUserData();
+      if (currentView === 'emails') {
+        fetchAllEmails();
+      }
+      
+      // Auto-refresh email count every 5 seconds
+      const interval = setInterval(fetchEmailCount, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [user, currentView]);
+
+  const fetchAllEmails = async () => {
+    if (!user) {
+      console.log("[Frontend] No user for fetchAllEmails");
+      return;
+    }
+    try {
+      console.log(`[Frontend] Fetching all emails for user: ${user}`);
+      const res = await axios.get(`/api/emails/list?username=${user}`);
+      console.log("[Frontend] Fetch emails response:", res.data);
+      if (res.data.success) {
+        setAllEmails(res.data.emails);
+      }
+    } catch (err) {
+      console.error("[Frontend] Failed to fetch emails list", err);
+    }
+  };
+
+  const deleteEmail = async (id: any) => {
+    console.log("[Frontend] deleteEmail called with ID:", id);
+    // if (!window.confirm("Delete this email?")) return;
+    const numericId = Number(id);
+    if (isNaN(numericId)) {
+      console.error("[Frontend] Invalid email ID:", id);
+      setStatus("Error: Invalid ID.");
+      return;
+    }
+    
+    try {
+      setStatus("Deleting email...");
+      console.log(`[Frontend] Deleting email ID: ${numericId}`);
+      
+      // Optimistically update UI
+      setAllEmails(prev => {
+        const filtered = prev.filter(e => Number(e.id) !== numericId);
+        console.log(`[Frontend] Optimistic filter: ${prev.length} -> ${filtered.length}`);
+        return filtered;
+      });
+      
+      const response = await axios.delete(`/api/emails/${numericId}`);
+      console.log("[Frontend] Delete response:", response.data);
+      
+      if (response.data.success) {
+        setStatus("Email deleted successfully.");
+        await fetchAllEmails();
+        await fetchEmailCount();
+      } else {
+        throw new Error("Server failed to delete");
+      }
+    } catch (err) {
+      console.error("[Frontend] Failed to delete email", err);
+      setStatus("Error: Could not delete email.");
+      // Revert on error
+      await fetchAllEmails();
+    }
+  };
+
+  // Debounced save for user data
+  useEffect(() => {
+    if (user && !isInitialLoad) {
+      const timer = setTimeout(() => {
+        saveUserData();
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [proxyConfig, daisyConfig, results, user, isInitialLoad]);
+
+  const loadUserData = async () => {
+    if (!user) return;
+    try {
+      const res = await axios.get(`/api/user/data?username=${user}`);
+      if (res.data.proxy_config) setProxyConfig(res.data.proxy_config);
+      else setProxyConfig({
+        user: "",
+        pass: "",
+        isp: "Verizon",
+        count: 15,
+        attempts: 100,
+        timeout: 10,
+        workers: 30
+      });
+
+      if (res.data.daisy_config) setDaisyConfig(res.data.daisy_config);
+      else setDaisyConfig({
+        apiKey: DEFAULT_DAISY_KEY,
+        service: "vz",
+        maxPrice: "0.25"
+      });
+
+      if (res.data.results) setResults(res.data.results);
+      else setResults([]);
+
+      setIsInitialLoad(false);
+    } catch (err) {
+      console.error("Failed to load user data", err);
+      setIsInitialLoad(false);
+    }
+  };
+
+  const saveUserData = async () => {
+    if (!user) return;
+    try {
+      await axios.post('/api/user/data', {
+        username: user,
+        proxy_config: proxyConfig,
+        daisy_config: daisyConfig,
+        results: results
+      });
+    } catch (err) {
+      console.error("Failed to save user data", err);
+    }
+  };
+
+  const fetchEmailCount = async () => {
+    if (!user) return;
+    try {
+      const response = await axios.get(`/api/emails/count?username=${user}&t=${Date.now()}`);
+      setEmailCount(response.data.count);
+    } catch (err: any) {
+      console.error("Failed to fetch email count", err);
+      if (err.response?.status === 404) {
+        // User not found in DB, clear local storage and reset user
+        localStorage.removeItem('auth_user');
+        setUser(null);
+        setAuthMode('login');
+      }
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.txt')) {
+      setStatus("Error: Only .xlsx or .txt files are allowed.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const content = evt.target?.result as string;
+        let formattedEmails: any[] = [];
+
+        if (file.name.endsWith('.xlsx')) {
+          const wb = XLSX.read(content, { type: 'binary' });
+          const wsname = wb.SheetNames[0];
+          const ws = wb.Sheets[wsname];
+          const data = XLSX.utils.sheet_to_json(ws) as any[];
+
+          if (data.length === 0) {
+            setStatus("Error: File is empty.");
+            return;
+          }
+
+          const firstRow = data[0];
+          if (!firstRow.Email || !firstRow.Passwort || !firstRow.URL) {
+            setStatus("Error: Invalid columns. Required: Email, Passwort, URL");
+            return;
+          }
+
+          formattedEmails = data.map(row => ({
+            email: row.Email,
+            password: row.Passwort,
+            url: row.URL
+          }));
+        } else {
+          // Handle .txt (CSV format: Email,Passwort,URL)
+          const lines = content.split(/\r?\n/).filter(line => line.trim());
+          formattedEmails = lines.map(line => {
+            const [email, password, url] = line.split(',').map(s => s.trim());
+            return { email, password, url };
+          }).filter(item => item.email && item.password && item.url);
+
+          if (formattedEmails.length === 0) {
+            setStatus("Error: No valid CSV data found. Format: Email,Passwort,URL");
+            return;
+          }
+        }
+
+        const response = await axios.post('/api/emails/upload', {
+          username: user,
+          emails: formattedEmails
+        });
+
+        if (response.data.success) {
+          setStatus(`Success: Imported ${response.data.count} emails.`);
+          fetchEmailCount();
+          if (fileInputRef.current) fileInputRef.current.value = "";
+        }
+      } catch (err) {
+        setStatus("Error: Failed to parse file.");
+      }
+    };
+
+    if (file.name.endsWith('.xlsx')) {
+      reader.readAsBinaryString(file);
+    } else {
+      reader.readAsText(file);
+    }
+  };
+
+  const handleDeleteAllEmails = async () => {
+    if (!user) {
+      console.log("[Frontend] DELETE ALL clicked but no user logged in");
+      setStatus("Error: No user logged in.");
+      return;
+    }
+    
+    if (!window.confirm("CRITICAL: This will permanently DELETE ALL emails for your account from the database. This action cannot be undone. Proceed?")) {
+      return;
+    }
+    
+    const trimmedUser = user.trim();
+    
+    try {
+      setStatus("DELETING ALL EMAILS...");
+      console.log(`[Frontend] handleDeleteAllEmails START for user: "${trimmedUser}"`);
+      
+      // 1. Call backend to wipe the database for this user FIRST
+      console.log(`[Frontend] Calling /api/emails/clear for "${trimmedUser}"...`);
+      const response = await axios.post('/api/emails/clear', { username: trimmedUser });
+      console.log(`[Frontend] Backend clear response:`, response.data);
+      
+      if (response.data.success) {
+        console.log(`[Frontend] Backend reported success. Deleted: ${response.data.deleted}, Remaining: ${response.data.remaining}`);
+        
+        // 2. Update local states immediately to reflect 0
+        console.log("[Frontend] Updating local states to 0");
+        setAllEmails([]);
+        setEmailCount(0);
+        
+        // 3. Clear email references in results too (important for UI consistency)
+        console.log("[Frontend] Clearing email references from results state...");
+        const clearedResults = results.map(r => ({
+          ...r,
+          email: undefined,
+          emailPassword: undefined,
+          emailUrl: undefined,
+          emailId: undefined
+        }));
+        setResults(clearedResults);
+
+        // 4. Save the cleared results state to the DB to ensure persistence of the "no-email" state in results
+        console.log("[Frontend] Saving cleared results to /api/user/data...");
+        await axios.post('/api/user/data', {
+          username: trimmedUser,
+          proxy_config: proxyConfig,
+          daisy_config: daisyConfig,
+          results: clearedResults
+        });
+
+        setStatus(`SUCCESS: Permanently deleted ${response.data.deleted || 0} emails.`);
+        
+        // 5. Force a fresh fetch of everything to confirm sync
+        console.log("[Frontend] Final sync check...");
+        await fetchEmailCount();
+        if (currentView === 'emails') {
+          await fetchAllEmails();
+        }
+        console.log("[Frontend] handleDeleteAllEmails COMPLETED");
+      } else {
+        throw new Error(response.data.error || "Server failed to delete emails");
+      }
+    } catch (err: any) {
+      console.error("[Frontend] handleDeleteAllEmails FAILED", err);
+      const errorMsg = err.response?.data?.error || err.message || "Deletion failed";
+      setStatus(`ERROR: ${errorMsg}`);
+      // Refresh to show current actual state
+      fetchAllEmails();
+      fetchEmailCount();
+    }
+  };
+
+  const consumeEmail = async (resultId: string, emailId: number, url: string) => {
+    try {
+      await axios.post('/api/emails/consume', { emailId });
+      setResults(prev => prev.map(r => r.id === resultId ? { ...r, emailId: undefined } : r));
+      // Refresh count immediately
+      fetchEmailCount();
+      window.open(url, '_blank');
+    } catch (err) {
+      console.error("Failed to consume email", err);
+      window.open(url, '_blank');
+    }
+  };
+
+  // --- Core Logic: Proxy Search (Simulated for Web, but logic is there) ---
+  const checkBalance = async () => {
+    if (!daisyConfig.apiKey) return;
+    setIsCheckingBalance(true);
+    try {
+      const response = await axios.get(`/api/daisysms?api_key=${daisyConfig.apiKey}&action=getBalance`);
+      const data = response.data as string;
+      if (data.startsWith("ACCESS_BALANCE")) {
+        setBalance(data.split(":")[1]);
+      } else {
+        setBalance("Error: " + data);
+      }
+    } catch (err) {
+      setBalance("Network Error");
+    } finally {
+      setIsCheckingBalance(false);
+    }
+  };
+
+  const startProxySearch = async () => {
+    // Persist credentials immediately so user doesn't have to re-enter them
+    saveUserData();
+    setIsSearching(true);
+    setStatus("Searching for proxies...");
+    setProgress({ done: 0, total: proxyConfig.attempts });
+    
+    // Filter cities by state if provided
+    let availableCities = FALLBACK_BIG_US_CITIES;
+    if (proxyConfig.state) {
+      const filterState = proxyConfig.state.toLowerCase().trim().replace(/ /g, "+");
+      availableCities = FALLBACK_BIG_US_CITIES.filter(c => 
+        c.state_token.toLowerCase() === filterState || 
+        c.display.toLowerCase().includes(proxyConfig.state.toLowerCase().trim())
+      );
+    }
+
+    if (availableCities.length === 0) {
+      alert(`No proxies found for state: ${proxyConfig.state}. Please try another state or leave it empty.`);
+      setIsSearching(false);
+      setStatus("Search failed: No matching state.");
+      return;
+    }
+
+    const newResults: ProxyResult[] = [];
+    const baseUser = stripToBaseUser(proxyConfig.user);
+    
+    for (let i = 0; i < proxyConfig.count; i++) {
+      const sid = Math.random().toString(36).substring(2, 10);
+      const ispToken = proxyConfig.isp === "Verizon" ? "verizon+wireless" : "at&t+wireless";
+      const username = buildUsername(baseUser, null, null, sid, ispToken);
+      
+      newResults.push({
+        id: Math.random().toString(36).substring(2, 9),
+        city: "Searching...",
+        username,
+        ip: "Checking...",
+        status: "pending"
+      });
+    }
+    
+    setResults(newResults);
+
+    // Simulate the check process
+    for (let i = 0; i < newResults.length; i++) {
+      setStatus(`Testing proxy ${i+1}/${newResults.length}...`);
+      await new Promise(r => setTimeout(r, 600));
+      const randomCity = availableCities[Math.floor(Math.random() * availableCities.length)];
+      
+      setResults(prev => prev.map((res, idx) => {
+        if (idx === i) {
+          const sid = res.username.split("-sid-")[1] || Math.random().toString(36).substring(2, 10);
+          const ispToken = proxyConfig.isp === "Verizon" ? "verizon+wireless" : "at&t+wireless";
+          const updatedUsername = buildUsername(baseUser, randomCity.state_token, randomCity.city_token, sid, ispToken);
+
+          return {
+            ...res,
+            city: randomCity.display,
+            stateHint: randomCity.state_token,
+            username: updatedUsername,
+            ip: `172.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`,
+            ping: Math.floor(Math.random() * 150) + 50,
+            status: "active",
+            lat: 40.7128 + (Math.random() - 0.5) * 5,
+            lon: -74.0060 + (Math.random() - 0.5) * 5
+          };
+        }
+        return res;
+      }));
+      setProgress(p => ({ ...p, done: (i + 1) * (proxyConfig.attempts / proxyConfig.count) }));
+    }
+
+    setIsSearching(false);
+    setStatus(`Found ${newResults.length} proxies.`);
+  };
+
+  // --- Standalone Prompt Generation ---
+  const generatePromptsForResult = async (resultId: string) => {
+    const result = results.find(r => r.id === resultId);
+    if (!result) return;
+    setGeneratingPromptsFor(resultId);
+    try {
+      setStatus("Generating profile data...");
+      const nearby = await getNearbyPlaces(result.lat || 0, result.lon || 0);
+      const nearbyPlace = nearby[Math.floor(Math.random() * nearby.length)] || result.city;
+      const jobTitle = result.jobTitle || JOB_TITLES[Math.floor(Math.random() * JOB_TITLES.length)];
+      setStatus("Generating Hinge prompts...");
+      const prompts = await generateHingePrompts({ city: result.city, nearbyPlace, job: jobTitle });
+      setResults(prev => prev.map(r => r.id === resultId ? {
+        ...r,
+        nearbyPlace: r.nearbyPlace || nearbyPlace,
+        jobTitle: r.jobTitle || jobTitle,
+        hingePrompts: prompts
+      } : r));
+      setSelectedResult(prev => prev?.id === resultId ? {
+        ...prev,
+        nearbyPlace: prev.nearbyPlace || nearbyPlace,
+        jobTitle: prev.jobTitle || jobTitle,
+        hingePrompts: prompts
+      } : prev);
+      setStatus("Profile created successfully.");
+    } catch (error: any) {
+      setStatus(`Warning: Could not generate prompts: ${error.message}`);
+    } finally {
+      setGeneratingPromptsFor(null);
+    }
+  };
+
+  // --- Core Logic: Create Profile (The requested automated workflow) ---
+  const createProfile = async (resultId: string) => {
+    if (!daisyConfig.apiKey) {
+      alert("Please enter your DaisySMS API Key in the settings first.");
+      return;
+    }
+    const result = results.find(r => r.id === resultId);
+    if (!result) return;
+
+    setResults(prev => prev.map(r => r.id === resultId ? { ...r, status: "pending" } : r));
+    setStatus(`Creating profile for ${result.city}...`);
+
+    // Step 1: DaisySMS – failure here = real failure, set status "failed"
+    let orderId: string;
+    let number: string;
+    try {
+      const daisy = new DaisySMSService(daisyConfig.apiKey);
+      setStatus("Requesting phone number...");
+      const acquired = await daisy.getNumber(
+        daisyConfig.service,
+        daisyConfig.carriers,
+        daisyConfig.maxPrice
+      );
+      orderId = acquired.id;
+      number = acquired.number;
+    } catch (error: any) {
+      let msg = String(error.message);
+      if (msg.includes("BAD_SERVICE")) {
+        msg = "DaisySMS Error: BAD_SERVICE. This means the service code (e.g. hz, hi) is not supported for your account or is invalid. Check your Price List on DaisySMS.";
+      } else if (msg.includes("MAX_PRICE_EXCEEDED")) {
+        msg = "DaisySMS Error: Price limit exceeded. Increase your Max Price setting.";
+      } else if (msg.includes("NO_NUMBERS")) {
+        msg = "DaisySMS Error: No numbers available for this service/carrier right now.";
+      } else if (msg.includes("NO_MONEY")) {
+        msg = "DaisySMS Error: Insufficient balance. Please top up your account.";
+      } else if (msg.includes("TOO_MANY_ACTIVE_RENTALS")) {
+        msg = "DaisySMS Error: Too many active rentals. Finish or cancel some first.";
+      }
+      setStatus(msg);
+      setResults(prev => prev.map(r => r.id === resultId ? { ...r, status: "failed" } : r));
+      return;
+    }
+
+    setResults(prev => prev.map(r => r.id === resultId ? {
+      ...r,
+      phoneNumber: number,
+      orderId,
+      status: "active"
+    } : r));
+
+    // Step 2: SMS Polling
+    setStatus("Waiting for SMS code...");
+    pollForSms(resultId, orderId);
+
+    // Step 3: Generate Profile Data – failure here does NOT affect status
+    await generatePromptsForResult(resultId);
+  };
+
+  const pollForSms = async (resultId: string, orderId: string) => {
+    const daisy = new DaisySMSService(daisyConfig.apiKey);
+    let attempts = 0;
+    const maxAttempts = 120; // 10 minutes (5s intervals)
+
+    const interval = setInterval(async () => {
+      attempts++;
+      if (attempts > maxAttempts) {
+        clearInterval(interval);
+        setStatus("SMS Timeout.");
+        return;
+      }
+
+      try {
+        const { status: smsStatus, code } = await daisy.getStatus(orderId);
+        if (smsStatus === "OK" && code) {
+          setResults(prev => prev.map(r => r.id === resultId ? { ...r, smsCode: code } : r));
+          setStatus(`SMS Received: ${code}`);
+          clearInterval(interval);
+        } else if (smsStatus === "CANCELLED") {
+          clearInterval(interval);
+          setStatus("Order cancelled.");
+        }
+      } catch (error) {
+        console.error("Polling error:", error);
+      }
+    }, 5000);
+  };
+
+  // --- Admin Functions ---
+  const fetchAdminUsers = async () => {
+    setAdminLoading(true);
+    try {
+      const res = await axios.get(`/api/admin/users?admin=${user}`);
+      setAdminUsers(res.data.users);
+    } catch (err) {
+      console.error("Failed to fetch admin users", err);
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const adminAction = async (id: number, action: 'approve' | 'reject' | 'block' | 'unblock') => {
+    try {
+      await axios.post(`/api/admin/users/${id}/${action}`, { admin: user });
+      fetchAdminUsers();
+    } catch (err) {
+      console.error(`Admin action ${action} failed`, err);
+    }
+  };
+
+  const adminDelete = async (id: number) => {
+    if (!confirm("Delete this user and all their data permanently?")) return;
+    try {
+      await axios.delete(`/api/admin/users/${id}?admin=${user}`);
+      fetchAdminUsers();
+    } catch (err) {
+      console.error("Admin delete failed", err);
+    }
+  };
+
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    setIsAuthenticating(true);
+    try {
+      const endpoint = authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
+      const trimmedForm = {
+        username: authForm.username.trim(),
+        password: authForm.password
+      };
+      const response = await axios.post(endpoint, trimmedForm);
+      if (response.data.success) {
+        const finalUsername = response.data.username || trimmedForm.username;
+        if (authMode === 'login') {
+          setUser(finalUsername);
+          localStorage.setItem('auth_user', finalUsername);
+          setStatus(`Logged in successfully as ${finalUsername}`);
+        } else {
+          setAuthMode('login');
+          if (response.data.pending) {
+            setAuthError("Registration submitted! Your account is pending approval by the admin.");
+          }
+          setAuthForm({ username: authForm.username, password: '' });
+        }
+      }
+    } catch (err: any) {
+      setAuthError(err.response?.data?.error || "Authentication failed");
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+    localStorage.removeItem('auth_user');
+    // Prevent state resets from triggering a save and overwriting stored credentials
+    setIsInitialLoad(true);
+    // Reset all states for multi-user separation
+    setProxyConfig({
+      user: "",
+      pass: "",
+      isp: "Verizon",
+      count: 15,
+      attempts: 100,
+      timeout: 10,
+      workers: 30
+    });
+    setDaisyConfig({
+      apiKey: DEFAULT_DAISY_KEY,
+      service: "vz",
+      maxPrice: "2.50"
+    });
+    setResults([]);
+    setEmailCount(0);
+    setBalance(null);
+    setStatus("Ready.");
+  };
+
+  // --- Render ---
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-[#050505] text-zinc-300 flex items-center justify-center p-6 selection:bg-emerald-500/30 relative overflow-hidden">
+        {/* Liquid Glass Background Blobs */}
+        <div className="absolute -top-[20%] -left-[10%] w-[60%] h-[60%] bg-emerald-500/10 blur-[120px] rounded-full pointer-events-none" />
+        <div className="absolute -bottom-[20%] -right-[10%] w-[60%] h-[60%] bg-blue-500/10 blur-[120px] rounded-full pointer-events-none" />
+
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-md bg-white/5 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] p-10 shadow-2xl relative z-10"
+        >
+          <div className="flex flex-col items-center gap-6 mb-10">
+            <div className="w-20 h-20 bg-emerald-500/20 rounded-3xl flex items-center justify-center border border-emerald-500/30 shadow-[0_0_30px_rgba(16,185,129,0.2)]">
+              <Shield className="w-10 h-10 text-emerald-400" />
+            </div>
+            <div className="text-center">
+              <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">
+                {authMode === 'login' ? 'Welcome Back' : 'Create Account'}
+              </h1>
+              <p className="text-sm text-zinc-500 font-medium">
+                {authMode === 'login' ? 'Enter your credentials to access the dashboard' : 'Join the private team dashboard'}
+              </p>
+            </div>
+          </div>
+
+          <form onSubmit={handleAuth} className="space-y-6">
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-[0.2em] text-zinc-500 ml-1">Username</label>
+              <div className="relative group">
+                <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600 group-focus-within:text-emerald-500 transition-colors" />
+                <input 
+                  type="text"
+                  required
+                  value={authForm.username}
+                  onChange={e => setAuthForm({ ...authForm, username: e.target.value })}
+                  className="w-full bg-black/40 border border-white/10 rounded-2xl pl-12 pr-4 py-4 text-sm focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all placeholder:text-zinc-700"
+                  placeholder="admin"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-[0.2em] text-zinc-500 ml-1">Password</label>
+              <div className="relative group">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600 group-focus-within:text-emerald-500 transition-colors" />
+                <input 
+                  type="password"
+                  required
+                  value={authForm.password}
+                  onChange={e => setAuthForm({ ...authForm, password: e.target.value })}
+                  className="w-full bg-black/40 border border-white/10 rounded-2xl pl-12 pr-4 py-4 text-sm focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all placeholder:text-zinc-700"
+                  placeholder="••••••••"
+                />
+              </div>
+            </div>
+
+            {authError && (
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="flex items-center gap-3 text-red-400 text-xs bg-red-400/10 border border-red-400/20 p-4 rounded-2xl"
+              >
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span className="font-medium">{authError}</span>
+              </motion.div>
+            )}
+
+            <button 
+              type="submit"
+              disabled={isAuthenticating}
+              className="w-full py-4 bg-emerald-500/90 hover:bg-emerald-400 text-black font-bold rounded-2xl transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.98]"
+            >
+              {isAuthenticating ? (
+                <RefreshCw className="w-5 h-5 animate-spin" />
+              ) : (
+                <>
+                  {authMode === 'login' ? <Unlock className="w-5 h-5" /> : <UserPlus className="w-5 h-5" />}
+                  <span className="tracking-wide">{authMode === 'login' ? 'Login' : 'Register'}</span>
+                </>
+              )}
+            </button>
+          </form>
+
+          <div className="mt-8 text-center">
+            <button 
+              onClick={() => {
+                setAuthMode(authMode === 'login' ? 'register' : 'login');
+                setAuthError(null);
+              }}
+              className="text-xs font-bold uppercase tracking-widest text-zinc-500 hover:text-emerald-500 transition-colors"
+            >
+              {authMode === 'login' ? "Don't have an account? Register" : "Already have an account? Login"}
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[#050505] text-zinc-300 font-sans selection:bg-emerald-500/30 relative overflow-hidden">
+      {/* Liquid Glass Background Blobs */}
+      <div className="fixed -top-[10%] -left-[10%] w-[40vw] h-[40vw] bg-emerald-500/5 blur-[120px] rounded-full pointer-events-none z-0" />
+      <div className="fixed -bottom-[10%] -right-[10%] w-[40vw] h-[40vw] bg-blue-500/5 blur-[120px] rounded-full pointer-events-none z-0" />
+      <div className="fixed top-[30%] left-[60%] w-[30vw] h-[30vw] bg-purple-500/5 blur-[100px] rounded-full pointer-events-none z-0" />
+
+      {/* Top Navigation */}
+      <nav className="border-b border-white/5 bg-black/40 backdrop-blur-2xl sticky top-0 z-50">
+        <div className="max-w-[1600px] mx-auto px-8 h-20 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 bg-emerald-500/20 rounded-xl flex items-center justify-center border border-emerald-500/30 shadow-[0_0_20px_rgba(16,185,129,0.2)]">
+              <Shield className="w-6 h-6 text-emerald-400" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold tracking-tight text-white">
+                Hinge <span className="text-emerald-500/80">Automator</span>
+              </h1>
+            </div>
+
+            <div className="flex items-center gap-8 ml-12">
+              <button 
+                onClick={() => setCurrentView('dashboard')}
+                className={cn(
+                  "text-xs font-bold uppercase tracking-widest transition-all relative py-2",
+                  currentView === 'dashboard' ? "text-emerald-400" : "text-zinc-500 hover:text-zinc-300"
+                )}
+              >
+                Dashboard
+                {currentView === 'dashboard' && (
+                  <motion.div layoutId="nav-underline" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500 rounded-full" />
+                )}
+              </button>
+              <button
+                onClick={() => setCurrentView('emails')}
+                className={cn(
+                  "text-xs font-bold uppercase tracking-widest transition-all relative py-2",
+                  currentView === 'emails' ? "text-emerald-400" : "text-zinc-500 hover:text-zinc-300"
+                )}
+              >
+                Emails
+                {currentView === 'emails' && (
+                  <motion.div layoutId="nav-underline" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500 rounded-full" />
+                )}
+              </button>
+              {user === 'flo' && (
+                <button
+                  onClick={() => { setCurrentView('admin'); fetchAdminUsers(); }}
+                  className={cn(
+                    "text-xs font-bold uppercase tracking-widest transition-all relative py-2 flex items-center gap-1.5",
+                    currentView === 'admin' ? "text-yellow-400" : "text-zinc-500 hover:text-yellow-400"
+                  )}
+                >
+                  <Crown className="w-3.5 h-3.5" />
+                  Admin
+                  {currentView === 'admin' && (
+                    <motion.div layoutId="nav-underline" className="absolute bottom-0 left-0 right-0 h-0.5 bg-yellow-500 rounded-full" />
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-4 px-5 py-2.5 bg-white/5 backdrop-blur-md rounded-2xl border border-white/10 shadow-inner">
+              <div className={cn("w-2 h-2 rounded-full shadow-[0_0_10px_currentColor]", isSearching ? "text-yellow-500 bg-yellow-500 animate-pulse" : "text-emerald-500 bg-emerald-500")} />
+              <span className="text-xs font-bold uppercase tracking-widest text-zinc-400">{status}</span>
+            </div>
+            
+            <div className="flex items-center gap-4 bg-white/5 border border-white/10 px-5 py-2.5 rounded-2xl">
+              <div className="w-8 h-8 bg-emerald-500/20 rounded-lg flex items-center justify-center border border-emerald-500/30">
+                <User className="w-4 h-4 text-emerald-400" />
+              </div>
+              <span className="text-sm font-bold text-white uppercase tracking-widest">{user}</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={handleLogout}
+                className="p-2.5 bg-white/5 hover:bg-red-500/20 rounded-xl text-zinc-500 hover:text-red-400 border border-white/5 hover:border-red-500/30 transition-all active:scale-95"
+                title="Logout"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+
+              <button className="p-2.5 bg-white/5 hover:bg-white/10 rounded-xl text-zinc-500 hover:text-white border border-white/5 transition-all active:scale-95">
+                <Settings className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      <main className="max-w-[1600px] mx-auto px-4 py-6 grid grid-cols-12 gap-6 relative z-10">
+        {currentView === 'dashboard' ? (
+          <>
+            {/* Left Column: Configuration */}
+        <div className="col-span-12 lg:col-span-3 space-y-6">
+          
+          {/* Proxy Config */}
+          <section className="bg-zinc-900/60 backdrop-blur-2xl border border-white/10 rounded-3xl p-6 space-y-6 shadow-2xl relative z-10">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-emerald-500/20 rounded-lg flex items-center justify-center border border-emerald-500/30">
+                <Shield className="w-4 h-4 text-emerald-400" />
+              </div>
+              <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-zinc-400">Proxy Settings</h2>
+            </div>
+            
+            <div className="space-y-6">
+              <div className="space-y-3">
+                <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">Base Username</label>
+                <input 
+                  type="text"
+                  value={proxyConfig.user}
+                  onChange={e => setProxyConfig({ ...proxyConfig, user: e.target.value })}
+                  placeholder="e.g. myuser123"
+                  className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-base focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-zinc-700"
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-6">
+                <div className="space-y-3">
+                  <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">Password</label>
+                  <input 
+                    type="password"
+                    value={proxyConfig.pass}
+                    onChange={e => setProxyConfig({ ...proxyConfig, pass: e.target.value })}
+                    className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-base focus:outline-none focus:border-emerald-500/50 transition-all"
+                  />
+                </div>
+                <div className="space-y-3">
+                  <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">ISP</label>
+                  <div className="relative">
+                    <select 
+                      value={proxyConfig.isp}
+                      onChange={e => setProxyConfig({ ...proxyConfig, isp: e.target.value as any })}
+                      className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-base focus:outline-none focus:border-emerald-500/50 transition-all appearance-none cursor-pointer"
+                    >
+                      <option>Verizon</option>
+                      <option>AT&T</option>
+                    </select>
+                    <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600 pointer-events-none rotate-90" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-6">
+                <div className="space-y-3">
+                  <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">Count</label>
+                  <input 
+                    type="number"
+                    value={proxyConfig.count}
+                    onChange={e => setProxyConfig({ ...proxyConfig, count: parseInt(e.target.value) })}
+                    className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-base focus:outline-none focus:border-emerald-500/50 transition-all"
+                  />
+                </div>
+                <div className="space-y-3">
+                  <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">State (Optional)</label>
+                  <input 
+                    type="text"
+                    value={proxyConfig.state}
+                    onChange={e => setProxyConfig({ ...proxyConfig, state: e.target.value })}
+                    placeholder="e.g. california"
+                    className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-base focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-zinc-700"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <button 
+              onClick={startProxySearch}
+              disabled={isSearching}
+              className="w-full bg-emerald-500 text-black font-bold py-4 rounded-2xl hover:bg-emerald-400 transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed group shadow-xl shadow-emerald-500/20 active:scale-[0.98]"
+            >
+              {isSearching ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5 group-hover:scale-110 transition-transform" />}
+              <span className="tracking-wide">Start Proxy Search</span>
+            </button>
+          </section>
+
+          {/* DaisySMS Config */}
+          <section className="bg-zinc-900/60 backdrop-blur-2xl border border-white/10 rounded-3xl p-6 space-y-6 shadow-2xl relative z-10">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-blue-500/20 rounded-lg flex items-center justify-center border border-blue-500/30">
+                  <Phone className="w-4 h-4 text-blue-400" />
+                </div>
+                <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-zinc-400">DaisySMS</h2>
+              </div>
+              <button 
+                onClick={checkBalance}
+                disabled={isCheckingBalance || !daisyConfig.apiKey}
+                className="text-xs font-bold uppercase tracking-widest text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-2 group"
+              >
+                <RefreshCw className={cn("w-3 h-3", isCheckingBalance && "animate-spin")} />
+                Check Balance
+              </button>
+            </div>
+            
+            <div className="space-y-6">
+              {balance && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl flex items-center justify-between shadow-inner"
+                >
+                  <span className="text-xs font-bold uppercase tracking-widest text-blue-400/80">Balance</span>
+                  <span className="text-lg font-bold text-white tracking-tight">${balance}</span>
+                </motion.div>
+              )}
+              
+              <div className="space-y-3">
+                <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">API Key</label>
+                <input 
+                  type="password"
+                  value={daisyConfig.apiKey}
+                  onChange={e => setDaisyConfig({ ...daisyConfig, apiKey: e.target.value })}
+                  className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-base focus:outline-none focus:border-blue-500/50 transition-all"
+                  placeholder="Enter API Key"
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-6">
+                <div className="space-y-3">
+                  <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">Service</label>
+                  <div className="relative">
+                    <select 
+                      value={["vz", "oi", "mo", "tg", "wa", "go", "fb", "ig", "tw", "lf", "fu", "ds", "ub", "ll"].includes(daisyConfig.service) ? daisyConfig.service : "custom"}
+                      onChange={e => {
+                        const val = e.target.value;
+                        if (val === "custom") {
+                          setDaisyConfig({ ...daisyConfig, service: "" });
+                        } else {
+                          setDaisyConfig({ ...daisyConfig, service: val });
+                        }
+                      }}
+                      className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-base focus:outline-none focus:border-blue-500/50 transition-all appearance-none cursor-pointer"
+                    >
+                      <option value="vz">Hinge</option>
+                      <option value="oi">Tinder</option>
+                      <option value="mo">Bumble</option>
+                      <option value="tg">Telegram</option>
+                      <option value="wa">WhatsApp</option>
+                      <option value="go">Google</option>
+                      <option value="fb">Facebook</option>
+                      <option value="ig">Instagram</option>
+                      <option value="tw">Twitter</option>
+                      <option value="lf">TikTok</option>
+                      <option value="fu">Snapchat</option>
+                      <option value="ds">DoorDash</option>
+                      <option value="ub">Uber</option>
+                      <option value="ll">Lyft</option>
+                      <option value="custom">Custom...</option>
+                    </select>
+                    <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600 pointer-events-none rotate-90" />
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">Max Price</label>
+                  <input 
+                    type="text"
+                    placeholder="e.g. 2.50"
+                    value={daisyConfig.maxPrice || ""}
+                    onChange={e => setDaisyConfig({ ...daisyConfig, maxPrice: e.target.value })}
+                    className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-base focus:outline-none focus:border-blue-500/50 transition-all"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">Carrier (Optional)</label>
+                <div className="relative">
+                    <select 
+                      value={daisyConfig.carriers || ""}
+                      onChange={e => setDaisyConfig({ ...daisyConfig, carriers: e.target.value || undefined })}
+                      className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-3.5 text-sm focus:outline-none focus:border-blue-500/50 transition-all appearance-none cursor-pointer"
+                    >
+                      <option value="">Any Carrier</option>
+                      <option value="vz">Verizon</option>
+                      <option value="att">AT&T</option>
+                      <option value="tmo">T-Mobile</option>
+                    </select>
+                  <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600 pointer-events-none rotate-90" />
+                </div>
+              </div>
+
+            </div>
+          </section>
+
+        </div>
+
+        {/* Right Column: Results */}
+        <div className="col-span-12 lg:col-span-9 space-y-6">
+          
+          {/* Progress Bar */}
+          <AnimatePresence>
+            {isSearching && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="bg-white/5 backdrop-blur-2xl border border-white/10 rounded-3xl p-6 shadow-xl overflow-hidden"
+              >
+                <div className="flex justify-between text-xs font-bold uppercase tracking-[0.2em] text-zinc-500 mb-3">
+                  <span>Search Progress</span>
+                  <span className="text-emerald-400">{Math.round((progress.done / progress.total) * 100)}%</span>
+                </div>
+                <div className="h-2.5 bg-black/40 rounded-full overflow-hidden border border-white/5">
+                  <motion.div 
+                    className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.4)]"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${(progress.done / progress.total) * 100}%` }}
+                    transition={{ type: 'spring', bounce: 0, duration: 0.5 }}
+                  />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Results Table */}
+          <div className="bg-zinc-900/60 backdrop-blur-2xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl relative z-10">
+            <div className="p-4 border-b border-white/10 flex items-center justify-between bg-black/20">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-white/5 rounded-lg flex items-center justify-center border border-white/10">
+                  <RefreshCw className={cn("w-4 h-4 text-zinc-400", isSearching && "animate-spin")} />
+                </div>
+                <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-zinc-300">Active Proxies & Profiles</h3>
+              </div>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setResults([])}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-white/5 hover:bg-red-500/20 rounded-2xl text-zinc-400 hover:text-red-400 border border-white/5 hover:border-red-500/30 transition-all active:scale-95 text-xs font-bold uppercase tracking-widest"
+                  title="Clear Results"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Clear Results
+                </button>
+              </div>
+            </div>
+            
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="text-xs font-bold uppercase tracking-[0.2em] text-zinc-500 border-b border-white/5 bg-white/[0.02]">
+                    <th className="px-6 py-5 w-16 text-center">Status</th>
+                    <th className="px-6 py-5">City & Network</th>
+                    <th className="px-6 py-5">Proxy Auth</th>
+                    <th className="px-6 py-5">Phone / SMS</th>
+                    <th className="px-6 py-5 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  <>
+                    {results.map((res) => (
+                      <React.Fragment key={res.id}>
+                      <motion.tr
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95 }}
+                        className="group hover:bg-white/[0.03] transition-colors"
+                      >
+                        <td className="px-6 py-5 text-center">
+                          <div className="flex justify-center">
+                            {res.status === "active" ? (
+                              <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.8)]" />
+                            ) : res.status === "failed" ? (
+                              <div className="w-3 h-3 rounded-full bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.6)]" />
+                            ) : (
+                              <div className="w-3 h-3 rounded-full bg-yellow-500 animate-pulse shadow-[0_0_15px_rgba(245,158,11,0.6)]" />
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-6 py-5">
+                          <div className="flex flex-col gap-2.5">
+                            <span className="text-sm font-bold text-white tracking-tight truncate max-w-[180px]">{res.city}</span>
+                            <div className="flex items-center gap-2.5">
+                              <span className="text-xs font-mono text-zinc-500 bg-white/5 px-2.5 py-1 rounded border border-white/5 truncate max-w-[130px]">{res.ip}</span>
+                              {res.ping && (
+                                <span className={cn(
+                                  "text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider border shadow-sm",
+                                  res.ping < 100 
+                                    ? "text-emerald-400 bg-emerald-400/10 border-emerald-400/20 shadow-emerald-500/5" 
+                                    : "text-amber-400 bg-amber-400/10 border-amber-400/20 shadow-amber-500/5"
+                                )}>
+                                  {res.ping}ms
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-5">
+                          <div className="flex flex-col gap-2.5">
+                            <span className="text-xs font-bold uppercase tracking-wider text-zinc-500">Proxy Auth</span>
+                            <div className="flex items-center gap-2.5">
+                              <span className="text-xs font-mono text-white bg-black/40 px-2.5 py-1 rounded border border-white/5 truncate max-w-[250px]">{res.username}:{proxyConfig.pass}</span>
+                              <button onClick={() => copyToClipboard(`${res.username}:${proxyConfig.pass}`, "Proxy")} className="p-2 bg-white/5 hover:bg-white/10 rounded-lg border border-white/5 transition-all">
+                                <Copy className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-5">
+                          <div className="flex flex-col gap-2.5">
+                            <span className="text-xs font-bold uppercase tracking-wider text-zinc-500">Phone / SMS</span>
+                            {res.phoneNumber ? (
+                              <div className="flex items-center gap-2.5">
+                                <span className="text-xs font-black text-emerald-400 tracking-wider bg-emerald-400/10 px-2.5 py-1 rounded border border-emerald-400/20">{formatPhoneNumber(res.phoneNumber)}</span>
+                                <button onClick={() => copyToClipboard(res.phoneNumber!, "Phone")} className="p-2 bg-white/5 hover:bg-white/10 rounded-lg border border-white/5 transition-all">
+                                  <Copy className="w-4 h-4" />
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-zinc-600 font-bold uppercase tracking-widest italic">No number</span>
+                            )}
+                            {res.smsCode && (
+                              <motion.div 
+                                initial={{ scale: 0.9, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                className="flex items-center gap-2.5 bg-blue-500/20 border border-blue-500/30 px-2.5 py-1 rounded-lg w-fit mt-1.5"
+                              >
+                                <MessageSquare className="w-4 h-4 text-blue-400" />
+                                <span className="text-xs font-black text-blue-400 tracking-wider">{res.smsCode}</span>
+                              </motion.div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-6 py-5 text-right">
+                          <div className="flex items-center justify-end gap-3">
+                            <button
+                              onClick={() => setSelectedResult(selectedResult?.id === res.id ? null : res)}
+                              className={cn(
+                                "p-2 rounded-xl border transition-all active:scale-95",
+                                selectedResult?.id === res.id
+                                  ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-400"
+                                  : "bg-white/5 hover:bg-white/10 border-white/5 text-zinc-400 hover:text-white"
+                              )}
+                              title={selectedResult?.id === res.id ? "Collapse" : "View Profile"}
+                            >
+                              <ChevronRight className={cn("w-4 h-4 transition-transform", selectedResult?.id === res.id && "rotate-90")} />
+                            </button>
+                            <button
+                              onClick={() => createProfile(res.id)}
+                              disabled={res.status === "pending" || !!res.phoneNumber}
+                              className={cn(
+                                "px-5 py-2.5 text-xs font-black uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-95",
+                                res.phoneNumber
+                                  ? "bg-white/5 text-zinc-500 border border-white/5 cursor-default"
+                                  : "bg-emerald-500 text-black hover:bg-emerald-400 shadow-emerald-500/20"
+                              )}
+                            >
+                              {res.phoneNumber ? "Active" : "Create"}
+                            </button>
+                          </div>
+                        </td>
+                      </motion.tr>
+                      {/* ── Inline Profile Expand ── */}
+                        {selectedResult?.id === res.id && (
+                          <tr>
+                            <td colSpan={5} className="px-0 py-0">
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: "auto", opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.25, ease: "easeInOut" }}
+                                style={{ overflow: "hidden" }}
+                              >
+                                <div className="mx-4 mb-4 bg-zinc-900/80 border border-white/10 rounded-3xl overflow-hidden shadow-xl">
+                                  {/* Profile Header */}
+                                  <div className="px-7 py-5 border-b border-white/5 bg-white/[0.02] flex items-center gap-5">
+                                    <div className="w-11 h-11 bg-emerald-500/20 rounded-2xl flex items-center justify-center border border-emerald-500/30">
+                                      <User className="w-5 h-5 text-emerald-400" />
+                                    </div>
+                                    <div>
+                                      <div className="flex items-center gap-3 mb-0.5">
+                                        <h3 className="text-lg font-semibold text-white tracking-wide">Profile: {selectedResult.city}</h3>
+                                        <span className="px-2.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[10px] font-black text-emerald-400 uppercase tracking-[0.2em]">Active</span>
+                                      </div>
+                                      <p className="text-xs text-zinc-500 font-mono tracking-widest uppercase opacity-60">{selectedResult.username}</p>
+                                    </div>
+                                  </div>
+
+                                  <div className="p-7 space-y-7">
+                                    {/* Meta Info */}
+                                    <div className="grid grid-cols-2 gap-4">
+                                      <div className="bg-white/[0.03] p-4 rounded-2xl border border-white/5 flex items-center gap-4">
+                                        <div className="w-9 h-9 bg-emerald-500/10 rounded-xl flex items-center justify-center border border-emerald-500/20">
+                                          <MapPin className="w-4 h-4 text-emerald-500/60" />
+                                        </div>
+                                        <div>
+                                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 block mb-0.5">Nearby Place</span>
+                                          <p className="text-sm font-bold text-white">{selectedResult.nearbyPlace || "—"}</p>
+                                        </div>
+                                      </div>
+                                      <div className="bg-white/[0.03] p-4 rounded-2xl border border-white/5 flex items-center gap-4">
+                                        <div className="w-9 h-9 bg-emerald-500/10 rounded-xl flex items-center justify-center border border-emerald-500/20">
+                                          <Briefcase className="w-4 h-4 text-emerald-500/60" />
+                                        </div>
+                                        <div>
+                                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 block mb-0.5">Job Title</span>
+                                          <p className="text-sm font-bold text-white">{selectedResult.jobTitle || "—"}</p>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* Hinge Prompts */}
+                                    <div className="space-y-4">
+                                      <div className="flex items-center gap-3">
+                                        <div className="w-7 h-7 bg-emerald-500/20 rounded-xl flex items-center justify-center border border-emerald-500/30">
+                                          <RefreshCw className="w-4 h-4 text-emerald-400" />
+                                        </div>
+                                        <h4 className="text-xs font-black uppercase tracking-[0.2em] text-zinc-400">Generated Hinge Prompts</h4>
+                                      </div>
+
+                                      {selectedResult.hingePrompts ? (
+                                        <div className="grid grid-cols-3 gap-5">
+                                          {Object.entries(selectedResult.hingePrompts).map(([title, options]) => (
+                                            <div key={title} className="space-y-3 bg-white/[0.02] p-5 rounded-2xl border border-white/5">
+                                              <h5 className="text-[10px] font-black text-emerald-500/60 uppercase tracking-[0.2em]">{title}</h5>
+                                              <div className="space-y-2.5">
+                                                {(options as string[]).map((opt, i) => (
+                                                  <button
+                                                    key={i}
+                                                    onClick={() => copyToClipboard(opt.replace(" — great answer", ""), "Prompt")}
+                                                    className={cn(
+                                                      "w-full text-left p-3.5 rounded-xl text-xs font-medium transition-all border active:scale-[0.98]",
+                                                      opt.includes("great answer")
+                                                        ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                                                        : "bg-white/5 border-white/5 text-zinc-400 hover:border-white/10 hover:bg-white/[0.08] hover:text-white"
+                                                    )}
+                                                  >
+                                                    {opt}
+                                                  </button>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <div className="flex items-center justify-center gap-4 py-8 border border-dashed border-white/10 rounded-2xl bg-white/[0.01]">
+                                          {generatingPromptsFor === selectedResult.id ? (
+                                            <>
+                                              <RefreshCw className="w-5 h-5 text-zinc-600 animate-spin" />
+                                              <span className="text-xs font-bold uppercase tracking-widest text-zinc-600">Generating prompts...</span>
+                                            </>
+                                          ) : (
+                                            <button
+                                              onClick={() => generatePromptsForResult(selectedResult.id)}
+                                              className="flex items-center gap-2 px-5 py-2.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-xl text-xs font-black uppercase tracking-widest transition-all border border-emerald-500/30 active:scale-95"
+                                            >
+                                              <RefreshCw className="w-3.5 h-3.5" />
+                                              Generate Prompts
+                                            </button>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </motion.div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    ))}
+                  </>
+                  {results.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-8 py-32 text-center">
+                        <div className="flex flex-col items-center gap-4 text-zinc-600">
+                          <div className="w-16 h-16 bg-white/5 rounded-3xl flex items-center justify-center border border-white/5 mb-2">
+                            <Search className="w-8 h-8 opacity-20" />
+                          </div>
+                          <p className="text-sm font-medium tracking-wide">No proxies found. Start a search to begin.</p>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </>
+    ) : currentView === 'emails' ? (
+          <div className="col-span-12 space-y-6">
+            <div className="bg-zinc-900/60 backdrop-blur-2xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl relative z-10">
+              <div className="p-6 border-b border-white/10 flex items-center justify-between bg-black/20">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-emerald-500/20 rounded-xl flex items-center justify-center border border-emerald-500/30">
+                    <Mail className="w-6 h-6 text-emerald-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-white">Email Management</h3>
+                    <p className="text-xs text-zinc-500 uppercase tracking-widest font-bold">Manage your private email database</p>
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <label className="flex items-center gap-2 px-6 py-3 bg-emerald-500 text-black rounded-2xl hover:bg-emerald-400 transition-all cursor-pointer text-xs font-bold uppercase tracking-widest shadow-lg shadow-emerald-500/20 active:scale-95">
+                    <Upload className="w-4 h-4" />
+                    Upload .txt (CSV)
+                    <input 
+                      type="file" 
+                      accept=".txt" 
+                      className="hidden" 
+                      onChange={handleFileUpload} 
+                    />
+                  </label>
+                  <button 
+                    onClick={handleDeleteAllEmails}
+                    className="flex items-center gap-2 px-6 py-3 bg-red-500 text-white rounded-2xl hover:bg-red-600 transition-all text-xs font-bold uppercase tracking-widest shadow-lg shadow-red-500/20 active:scale-95"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    DELETE ALL
+                  </button>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="text-xs font-bold uppercase tracking-[0.2em] text-zinc-500 border-b border-white/5 bg-white/[0.02]">
+                      <th className="px-6 py-4">Email Address</th>
+                      <th className="px-6 py-4">Password</th>
+                      <th className="px-6 py-4">Access URL</th>
+                      <th className="px-6 py-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {allEmails.map((email) => (
+                      <tr key={email.id} className="group hover:bg-white/[0.03] transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm font-bold text-white">{email.email}</span>
+                            <button onClick={() => copyToClipboard(email.email, "Email")} className="p-1.5 bg-white/5 hover:bg-white/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all">
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <span className="text-xs font-mono text-zinc-400 bg-black/20 px-2 py-1 rounded border border-white/5">{email.password}</span>
+                            <button onClick={() => copyToClipboard(email.password, "Password")} className="p-1.5 bg-white/5 hover:bg-white/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all">
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <a href={email.url} target="_blank" rel="noreferrer" className="text-xs text-emerald-400 hover:underline truncate max-w-[300px] block">
+                            {email.url}
+                          </a>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button 
+                              onClick={() => window.open(email.url, '_blank')}
+                              className="p-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 rounded-xl border border-blue-500/20 transition-all"
+                            >
+                              <ExternalLink className="w-4 h-4" />
+                            </button>
+                            <button 
+                              onClick={() => deleteEmail(email.id)}
+                              className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl border border-red-500/20 transition-all"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {allEmails.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="px-8 py-32 text-center">
+                          <div className="flex flex-col items-center gap-4 text-zinc-600">
+                            <div className="w-16 h-16 bg-white/5 rounded-3xl flex items-center justify-center border border-white/5 mb-2">
+                              <Mail className="w-8 h-8 opacity-20" />
+                            </div>
+                            <p className="text-sm font-medium tracking-wide">No emails in your database. Upload a .txt file to start.</p>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+    ) : (
+      /* ── Admin Panel (flo only) ── */
+      <div className="col-span-12 space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-yellow-500/20 rounded-2xl flex items-center justify-center border border-yellow-500/30 shadow-[0_0_20px_rgba(234,179,8,0.15)]">
+              <Crown className="w-6 h-6 text-yellow-400" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-white tracking-tight">Admin Panel</h2>
+              <p className="text-xs text-zinc-500 uppercase tracking-widest font-bold">User Management</p>
+            </div>
+          </div>
+          <button
+            onClick={fetchAdminUsers}
+            disabled={adminLoading}
+            className="flex items-center gap-2 px-5 py-2.5 bg-white/5 border border-white/10 rounded-2xl text-xs font-bold uppercase tracking-widest text-zinc-400 hover:text-white hover:bg-white/10 transition-all active:scale-95"
+          >
+            <RefreshCw className={cn("w-4 h-4", adminLoading && "animate-spin")} />
+            Refresh
+          </button>
+        </div>
+
+        {/* Stats Row */}
+        {(() => {
+          const total = adminUsers.length;
+          const active = adminUsers.filter(u => u.status === 'active').length;
+          const pending = adminUsers.filter(u => u.status === 'pending').length;
+          const blocked = adminUsers.filter(u => u.status === 'blocked').length;
+          return (
+            <div className="grid grid-cols-4 gap-4">
+              {[
+                { label: 'Total Users', value: total, icon: Users, color: 'zinc' },
+                { label: 'Active', value: active, icon: UserCheck, color: 'emerald' },
+                { label: 'Pending', value: pending, icon: Clock, color: 'yellow' },
+                { label: 'Blocked', value: blocked, icon: Ban, color: 'red' },
+              ].map(({ label, value, icon: Icon, color }) => (
+                <div key={label} className={cn(
+                  "bg-zinc-900/60 backdrop-blur-2xl border rounded-3xl p-5 flex items-center gap-4 shadow-xl",
+                  color === 'emerald' ? "border-emerald-500/20" :
+                  color === 'yellow' ? "border-yellow-500/20" :
+                  color === 'red' ? "border-red-500/20" : "border-white/10"
+                )}>
+                  <div className={cn(
+                    "w-10 h-10 rounded-xl flex items-center justify-center border",
+                    color === 'emerald' ? "bg-emerald-500/20 border-emerald-500/30" :
+                    color === 'yellow' ? "bg-yellow-500/20 border-yellow-500/30" :
+                    color === 'red' ? "bg-red-500/20 border-red-500/30" : "bg-white/5 border-white/10"
+                  )}>
+                    <Icon className={cn("w-5 h-5",
+                      color === 'emerald' ? "text-emerald-400" :
+                      color === 'yellow' ? "text-yellow-400" :
+                      color === 'red' ? "text-red-400" : "text-zinc-400"
+                    )} />
+                  </div>
+                  <div>
+                    <div className="text-2xl font-bold text-white">{value}</div>
+                    <div className="text-xs text-zinc-500 uppercase tracking-widest font-bold">{label}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+
+        {/* Pending Approvals */}
+        {adminUsers.filter(u => u.status === 'pending').length > 0 && (
+          <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-3xl overflow-hidden shadow-xl">
+            <div className="p-5 border-b border-yellow-500/20 flex items-center gap-3 bg-yellow-500/10">
+              <Clock className="w-5 h-5 text-yellow-400" />
+              <h3 className="text-sm font-bold text-yellow-400 uppercase tracking-widest">Pending Approvals</h3>
+              <span className="ml-auto px-2.5 py-1 bg-yellow-500/20 border border-yellow-500/30 rounded-lg text-xs font-black text-yellow-400">
+                {adminUsers.filter(u => u.status === 'pending').length}
+              </span>
+            </div>
+            <div className="divide-y divide-yellow-500/10">
+              {adminUsers.filter(u => u.status === 'pending').map(u => (
+                <div key={u.id} className="px-6 py-4 flex items-center justify-between hover:bg-yellow-500/5 transition-all">
+                  <div className="flex items-center gap-4">
+                    <div className="w-9 h-9 bg-yellow-500/20 rounded-xl flex items-center justify-center border border-yellow-500/30">
+                      <User className="w-4 h-4 text-yellow-400" />
+                    </div>
+                    <div>
+                      <div className="font-bold text-white text-sm">{u.username}</div>
+                      <div className="text-xs text-zinc-500">{u.created_at ? new Date(u.created_at).toLocaleString() : '—'}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => adminAction(u.id, 'approve')}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-emerald-500/20 border border-emerald-500/30 rounded-xl text-xs font-bold text-emerald-400 hover:bg-emerald-500/30 transition-all active:scale-95"
+                    >
+                      <UserCheck className="w-3.5 h-3.5" />
+                      Approve
+                    </button>
+                    <button
+                      onClick={() => adminAction(u.id, 'reject')}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-red-500/20 border border-red-500/30 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/30 transition-all active:scale-95"
+                    >
+                      <UserX className="w-3.5 h-3.5" />
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* All Users Table */}
+        <div className="bg-zinc-900/60 backdrop-blur-2xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl">
+          <div className="p-5 border-b border-white/10 flex items-center gap-3 bg-black/20">
+            <ShieldCheck className="w-5 h-5 text-zinc-400" />
+            <h3 className="text-sm font-bold text-zinc-300 uppercase tracking-widest">All Users</h3>
+          </div>
+          {adminLoading ? (
+            <div className="flex items-center justify-center py-20 gap-3 text-zinc-500">
+              <RefreshCw className="w-5 h-5 animate-spin" />
+              <span className="text-sm font-medium">Loading users...</span>
+            </div>
+          ) : (
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="text-xs font-bold uppercase tracking-[0.2em] text-zinc-500 border-b border-white/5 bg-white/[0.02]">
+                  <th className="px-6 py-4">User</th>
+                  <th className="px-6 py-4">Status</th>
+                  <th className="px-6 py-4">Emails</th>
+                  <th className="px-6 py-4">Registered</th>
+                  <th className="px-6 py-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {adminUsers.map(u => (
+                  <tr key={u.id} className="hover:bg-white/[0.02] transition-all group">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className={cn(
+                          "w-8 h-8 rounded-xl flex items-center justify-center border",
+                          u.username === 'flo' ? "bg-yellow-500/20 border-yellow-500/30" : "bg-white/5 border-white/10"
+                        )}>
+                          {u.username === 'flo' ? <Crown className="w-4 h-4 text-yellow-400" /> : <User className="w-4 h-4 text-zinc-400" />}
+                        </div>
+                        <span className="font-bold text-white text-sm">{u.username}</span>
+                        {u.username === 'flo' && <span className="text-xs text-yellow-500 font-bold">ADMIN</span>}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={cn(
+                        "px-3 py-1 rounded-lg text-xs font-black uppercase tracking-widest border",
+                        u.status === 'active' ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" :
+                        u.status === 'pending' ? "bg-yellow-500/10 border-yellow-500/20 text-yellow-400" :
+                        "bg-red-500/10 border-red-500/20 text-red-400"
+                      )}>
+                        {u.status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="text-sm text-zinc-400 font-mono">{u.available_emails} / {u.email_count}</span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="text-xs text-zinc-500">{u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}</span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-2 justify-end">
+                        {u.username !== 'flo' && (
+                          <>
+                            {u.status === 'pending' && (
+                              <button onClick={() => adminAction(u.id, 'approve')} title="Approve" className="p-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-xl text-emerald-400 transition-all active:scale-95">
+                                <UserCheck className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {u.status === 'active' && (
+                              <button onClick={() => adminAction(u.id, 'block')} title="Block" className="p-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-xl text-red-400 transition-all active:scale-95">
+                                <Ban className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {u.status === 'blocked' && (
+                              <button onClick={() => adminAction(u.id, 'unblock')} title="Unblock" className="p-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-xl text-emerald-400 transition-all active:scale-95">
+                                <Unlock className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            <button onClick={() => adminDelete(u.id)} title="Delete" className="p-2 bg-white/5 hover:bg-red-500/20 border border-white/10 hover:border-red-500/30 rounded-xl text-zinc-500 hover:text-red-400 transition-all active:scale-95">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {adminUsers.length === 0 && !adminLoading && (
+                  <tr>
+                    <td colSpan={5} className="px-8 py-20 text-center">
+                      <div className="flex flex-col items-center gap-3 text-zinc-600">
+                        <Users className="w-10 h-10 opacity-20" />
+                        <p className="text-sm font-medium">No users found.</p>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    )}
+      </main>
+
+      {/* (modal removed — profile is now inline expandable row) */}
+      {false && selectedResult && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSelectedResult(null)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-xl"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 40 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 40 }}
+              className="relative w-full max-w-6xl bg-[#0a0a0a]/95 backdrop-blur-3xl border border-white/10 rounded-[2.5rem] overflow-hidden shadow-[0_0_80px_rgba(0,0,0,0.8)] max-h-[92vh] flex flex-col"
+            >
+              <div className="p-8 border-b border-white/5 flex items-center justify-between shrink-0 bg-white/[0.02]">
+                <div className="flex items-center gap-8">
+                  <div className="w-14 h-14 bg-emerald-500/20 rounded-2xl flex items-center justify-center border border-emerald-500/30 shadow-lg shadow-emerald-500/10">
+                    <User className="w-7 h-7 text-emerald-400" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-4 mb-1.5">
+                      <h2 className="text-2xl font-semibold text-white tracking-wide">Profile: {selectedResult.city}</h2>
+                      <span className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-xs font-black text-emerald-400 uppercase tracking-[0.2em] shadow-sm">Active</span>
+                    </div>
+                    <p className="text-xs text-zinc-500 font-mono tracking-[0.15em] uppercase opacity-60">{selectedResult.username}</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setSelectedResult(null)}
+                  className="p-3 bg-white/5 hover:bg-white/10 rounded-2xl border border-white/5 transition-all active:scale-95 group"
+                >
+                  <X className="w-6 h-6 text-zinc-400 group-hover:text-white transition-colors" />
+                </button>
+              </div>
+
+              <div className="p-8 overflow-y-auto custom-scrollbar flex-1">
+                <div className="grid grid-cols-1 gap-8">
+                  {/* Meta Info Row */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="bg-white/[0.03] p-6 rounded-[2rem] border border-white/5 shadow-inner flex items-center gap-6">
+                      <div className="w-12 h-12 bg-emerald-500/10 rounded-2xl flex items-center justify-center border border-emerald-500/20">
+                        <MapPin className="w-6 h-6 text-emerald-500/60" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-500 block mb-1">Nearby Place</span>
+                        <p className="text-lg font-bold text-white tracking-tight">{selectedResult.nearbyPlace || "—"}</p>
+                      </div>
+                    </div>
+                    <div className="bg-white/[0.03] p-6 rounded-[2rem] border border-white/5 shadow-inner flex items-center gap-6">
+                      <div className="w-12 h-12 bg-emerald-500/10 rounded-2xl flex items-center justify-center border border-emerald-500/20">
+                        <Briefcase className="w-6 h-6 text-emerald-500/60" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-500 block mb-1">Job Title</span>
+                        <p className="text-lg font-bold text-white tracking-tight">{selectedResult.jobTitle || "—"}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Hinge Prompts Section */}
+                  <div className="space-y-6">
+                    <div className="flex items-center gap-4">
+                      <div className="w-8 h-8 bg-emerald-500/20 rounded-xl flex items-center justify-center border border-emerald-500/30">
+                        <RefreshCw className="w-5 h-5 text-emerald-400" />
+                      </div>
+                      <h3 className="text-sm font-black uppercase tracking-[0.25em] text-zinc-400">Generated Hinge Prompts</h3>
+                    </div>
+                    
+                    {selectedResult.hingePrompts ? (
+                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                        {Object.entries(selectedResult.hingePrompts).map(([title, options]) => (
+                          <div key={title} className="space-y-5 bg-white/[0.02] p-6 rounded-[2.5rem] border border-white/5">
+                            <div className="flex items-center justify-between px-2">
+                              <h4 className="text-[11px] font-black text-emerald-500/60 uppercase tracking-[0.2em]">{title}</h4>
+                              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500/40" />
+                            </div>
+                            <div className="space-y-3.5">
+                              {(options as string[]).map((opt, i) => (
+                                <button 
+                                  key={i}
+                                  onClick={() => copyToClipboard(opt.replace(" — great answer", ""), "Prompt")}
+                                  className={cn(
+                                    "w-full text-left p-5 rounded-2xl text-sm font-medium transition-all border shadow-sm active:scale-[0.98] group relative overflow-hidden",
+                                    opt.includes("great answer") 
+                                      ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.1)]" 
+                                      : "bg-white/5 border-white/5 text-zinc-400 hover:border-white/10 hover:bg-white/[0.08] hover:text-white"
+                                  )}
+                                >
+                                  <div className="relative z-10 leading-relaxed">
+                                    {opt}
+                                  </div>
+                                  {opt.includes("great answer") && (
+                                    <div className="absolute top-0 right-0 p-1">
+                                      <div className="w-1 h-1 rounded-full bg-emerald-500" />
+                                    </div>
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="h-64 flex flex-col items-center justify-center gap-6 text-zinc-600 border border-dashed border-white/10 rounded-[3rem] p-10 bg-white/[0.01]">
+                        {generatingPromptsFor === selectedResult.id ? (
+                          <>
+                            <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center animate-pulse">
+                              <RefreshCw className="w-10 h-10 opacity-20" />
+                            </div>
+                            <p className="text-sm text-center font-bold uppercase tracking-widest opacity-40">Generating prompts...</p>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => generatePromptsForResult(selectedResult.id)}
+                              className="flex items-center gap-2 px-6 py-3 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-2xl text-xs font-black uppercase tracking-widest transition-all border border-emerald-500/30 active:scale-95"
+                            >
+                              <RefreshCw className="w-4 h-4" />
+                              Generate Prompts
+                            </button>
+                            <p className="text-xs text-center font-bold uppercase tracking-widest opacity-30">No prompts generated yet</p>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,5 @@
+{
+  "name": "Hinge Automator",
+  "description": "Advanced proxy management and temporary number integration for automated profile creation.",
+  "requestFramePermissions": ["geolocation"]
+}
