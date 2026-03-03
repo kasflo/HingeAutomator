@@ -1295,10 +1295,10 @@ export default function App() {
                           </div>
                         </td>
                         <td className="px-6 py-3">
-                          <div className="flex flex-col gap-2">
+                          <div className="flex flex-col gap-1.5">
                             <span className="text-sm font-bold text-white tracking-tight truncate max-w-[200px]">{res.city}</span>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-xs font-mono text-zinc-500 bg-white/5 px-2.5 py-1 rounded border border-white/5 truncate max-w-[130px]">{res.ip}</span>
+                            <span className="text-xs font-mono text-zinc-500 bg-white/5 px-2.5 py-1 rounded border border-white/5 truncate max-w-[130px] w-fit">{res.ip}</span>
+                            <div className="flex items-center gap-2">
                               {res.ping && (
                                 <span className={cn(
                                   "text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider border shadow-sm",
@@ -1325,15 +1325,15 @@ export default function App() {
                                   ? <RefreshCw className="w-3 h-3 animate-spin" />
                                   : <ShieldCheck className="w-3 h-3" />}
                               </button>
+                              {res.fraudScore != null && (
+                                <span className={cn(
+                                  "text-[10px] font-black uppercase tracking-wider",
+                                  res.fraudScore < 40 ? "text-emerald-400" : res.fraudScore < 70 ? "text-yellow-400" : "text-red-400"
+                                )}>
+                                  {res.fraudScore}/100 · {res.fraudRisk}
+                                </span>
+                              )}
                             </div>
-                            {res.fraudScore != null && (
-                              <span className={cn(
-                                "text-[10px] font-black uppercase tracking-wider",
-                                res.fraudScore < 40 ? "text-emerald-400" : res.fraudScore < 70 ? "text-yellow-400" : "text-red-400"
-                              )}>
-                                {res.fraudScore}/100 · {res.fraudRisk}
-                              </span>
-                            )}
                           </div>
                         </td>
                         <td className="px-6 py-3">
