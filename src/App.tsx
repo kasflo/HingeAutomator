@@ -1347,7 +1347,7 @@ export default function App() {
                             <span className="text-xs font-bold uppercase tracking-wider text-zinc-500">Proxy Auth</span>
                             <div className="flex items-center gap-2.5">
                               <span className="text-xs font-mono text-white bg-black/40 px-2.5 py-1 rounded border border-white/5 truncate max-w-[250px]">{res.username}:{proxyConfig.pass}</span>
-                              <button onClick={() => copyToClipboard(`${res.username}:${proxyConfig.pass}`, "Proxy")} className="p-2 bg-white/5 hover:bg-white/10 rounded-lg border border-white/5 transition-all">
+                              <button onClick={() => copyToClipboard(res.username, "Proxy")} className="p-2 bg-white/5 hover:bg-white/10 rounded-lg border border-white/5 transition-all">
                                 <Copy className="w-4 h-4" />
                               </button>
                             </div>
