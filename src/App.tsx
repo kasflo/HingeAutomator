@@ -478,15 +478,17 @@ export default function App() {
       const ping = Math.floor(Math.random() * 120) + 10; // wider range so filter is realistic
       const ip = `172.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`;
 
+      const prefix = `[${attempt + 1}/${proxyConfig.attempts}]`;
+
       // Filter 1: ping must be < 95 ms
       if (ping >= 95) {
-        setStatus(`[${attempt + 1}/${proxyConfig.attempts}] ${ip} · ${ping}ms — zu langsam, übersprungen`);
+        setStatus(`${prefix} Ping ${ping}ms — zu langsam`);
         await new Promise(r => setTimeout(r, 80));
         continue;
       }
 
       // Filter 2: fraud score must be < 5
-      setStatus(`[${attempt + 1}/${proxyConfig.attempts}] ${ip} · ${ping}ms — Fraud prüfen...`);
+      setStatus(`${prefix} Fraud prüfen...`);
       let fraudScore: number | undefined;
       let fraudRisk: string | undefined;
       try {
@@ -494,20 +496,20 @@ export default function App() {
         fraudScore = fraudRes.data.score;
         fraudRisk = fraudRes.data.risk;
       } catch {
-        setStatus(`[${attempt + 1}/${proxyConfig.attempts}] ${ip} — Fraud-Check fehlgeschlagen, übersprungen`);
+        setStatus(`${prefix} Fraud-Check fehlgeschlagen`);
         await new Promise(r => setTimeout(r, 80));
         continue;
       }
 
       if (fraudScore === undefined || fraudScore >= 5) {
-        setStatus(`[${attempt + 1}/${proxyConfig.attempts}] ${ip} · fraud ${fraudScore}/100 — blockiert, übersprungen`);
+        setStatus(`${prefix} Score ${fraudScore ?? '?'}/100 — blockiert`);
         await new Promise(r => setTimeout(r, 80));
         continue;
       }
 
       // Proxy passes both filters — add immediately
       found++;
-      setStatus(`[${attempt + 1}/${proxyConfig.attempts}] ✓ ${ip} · ${ping}ms · fraud ${fraudScore}/100 — sauber! (${found}/${proxyConfig.count})`);
+      setStatus(`${prefix} ✓ Sauber — ${found}/${proxyConfig.count} gefunden`);
 
       const newResult: ProxyResult = {
         id: Math.random().toString(36).substring(2, 9),
@@ -928,9 +930,9 @@ export default function App() {
           </div>
           
           <div className="flex items-center gap-6">
-            <div className="flex items-center gap-4 px-5 py-2.5 bg-white/5 backdrop-blur-md rounded-2xl border border-white/10 shadow-inner">
-              <div className={cn("w-2 h-2 rounded-full shadow-[0_0_10px_currentColor]", isSearching ? "text-yellow-500 bg-yellow-500 animate-pulse" : "text-emerald-500 bg-emerald-500")} />
-              <span className="text-xs font-bold uppercase tracking-widest text-zinc-400">{status}</span>
+            <div className="flex items-center gap-3 px-4 py-2.5 bg-white/5 backdrop-blur-md rounded-2xl border border-white/10 shadow-inner w-[260px] overflow-hidden">
+              <div className={cn("w-2 h-2 rounded-full shrink-0 shadow-[0_0_10px_currentColor]", isSearching ? "text-yellow-500 bg-yellow-500 animate-pulse" : "text-emerald-500 bg-emerald-500")} />
+              <span className="text-xs font-bold uppercase tracking-widest text-zinc-400 truncate">{status}</span>
             </div>
             
             <div className="flex items-center gap-4 bg-white/5 border border-white/10 px-5 py-2.5 rounded-2xl">
@@ -1282,6 +1284,7 @@ export default function App() {
                 <tbody className="divide-y divide-white/5">
                   <>
                     {[...results]
+                      .filter(r => !!r.phoneNumber || r.fraudScore != null)
                       .sort((a, b) => (!!b.phoneNumber ? 1 : 0) - (!!a.phoneNumber ? 1 : 0))
                       .map((res) => (
                       <React.Fragment key={res.id}>
