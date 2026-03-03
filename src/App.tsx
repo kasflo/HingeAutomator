@@ -467,57 +467,44 @@ export default function App() {
 
     const baseUser = stripToBaseUser(proxyConfig.user);
     let found = 0;
-    let attempt = 0;
-    const MAX_ATTEMPTS = proxyConfig.count * 20; // hard cap: avoid infinite loop
 
-    // Loop until we have exactly count clean proxies
-    while (found < proxyConfig.count) {
-      attempt++;
-
-      // Hard cap: stop if too many consecutive failures (e.g. wrong credentials)
-      if (attempt > MAX_ATTEMPTS) {
-        setStatus(`Abgebrochen — zu viele Fehlversuche (${attempt}). Zugangsdaten prüfen.`);
-        break;
-      }
-
-      setProgress({ done: found, total: proxyConfig.count });
+    for (let attempt = 0; attempt < proxyConfig.attempts && found < proxyConfig.count; attempt++) {
+      setProgress({ done: attempt + 1, total: proxyConfig.attempts });
 
       const randomCity = availableCities[Math.floor(Math.random() * availableCities.length)];
       const sid = Math.random().toString(36).substring(2, 10);
       const ispToken = proxyConfig.isp === "Verizon" ? "verizon+wireless" : "at&t+wireless";
       const username = buildUsername(baseUser, randomCity.state_token, randomCity.city_token, sid, ispToken);
 
-      const prefix = `[${found}/${proxyConfig.count}]`;
+      const prefix = `[${attempt + 1}/${proxyConfig.attempts}]`;
 
       // Step 1: Real connectivity test through ProxyEmpire gateway
       setStatus(`${prefix} Verbinde...`);
       let ip: string;
       let ping: number;
       try {
-        const testRes = await axios.get(`/api/proxy-test?username=${encodeURIComponent(username)}&password=${encodeURIComponent(proxyConfig.pass)}`, {
-          timeout: 14000,
-        });
+        const testRes = await axios.get(
+          `/api/proxy-test?username=${encodeURIComponent(username)}&password=${encodeURIComponent(proxyConfig.pass)}`,
+          { timeout: 14000 }
+        );
         if (!testRes.data.ok) {
-          setStatus(`${prefix} Verbindung fehlgeschlagen`);
-          await new Promise(r => setTimeout(r, 300)); // prevent fast-spin UI freeze
+          setStatus(`${prefix} Fehlgeschlagen`);
           continue;
         }
         ip = testRes.data.ip;
         ping = testRes.data.ping;
       } catch {
-        setStatus(`${prefix} Verbindung fehlgeschlagen`);
-        await new Promise(r => setTimeout(r, 300));
+        setStatus(`${prefix} Timeout`);
         continue;
       }
 
-      // Step 2: Ping filter < 95ms
+      // Step 2: ping must be < 95 ms
       if (ping >= 95) {
         setStatus(`${prefix} Ping ${ping}ms — zu langsam`);
-        await new Promise(r => setTimeout(r, 100));
         continue;
       }
 
-      // Step 3: Fraud score filter < 5
+      // Step 3: fraud score must be < 5
       setStatus(`${prefix} Fraud prüfen... (${ping}ms)`);
       let fraudScore: number | undefined;
       let fraudRisk: string | undefined;
@@ -527,19 +514,16 @@ export default function App() {
         fraudRisk = fraudRes.data.risk;
       } catch {
         setStatus(`${prefix} Fraud-Check fehlgeschlagen`);
-        await new Promise(r => setTimeout(r, 300));
         continue;
       }
 
-      if (fraudScore === undefined || fraudScore === null || fraudScore >= 5) {
+      if (fraudScore === undefined || fraudScore >= 5) {
         setStatus(`${prefix} Score ${fraudScore ?? '?'}/100 — blockiert`);
-        await new Promise(r => setTimeout(r, 100));
         continue;
       }
 
-      // All filters passed — add to results immediately
+      // Proxy passes all filters — add immediately
       found++;
-      setProgress({ done: found, total: proxyConfig.count });
       setStatus(`${prefix} ✓ Sauber — ${found}/${proxyConfig.count} gefunden`);
 
       const newResult: ProxyResult = {
@@ -558,13 +542,17 @@ export default function App() {
 
       setResults(prev => {
         const created = prev.filter(r => !!r.phoneNumber);
-        const existing = prev.filter(r => !r.phoneNumber);
-        return [...created, ...existing, newResult];
+        const pending = prev.filter(r => !r.phoneNumber);
+        return [...created, ...pending, newResult];
       });
     }
 
     setIsSearching(false);
-    setStatus(`Fertig — ${found} Proxies gefunden (ping <95ms, fraud <5/100).`);
+    setStatus(
+      found === 0
+        ? `Keine sauberen Proxies nach ${proxyConfig.attempts} Versuchen. Erhöhe die Anzahl der Attempts.`
+        : `Fertig — ${found} saubere Proxies gefunden (ping <95ms, fraud <5/100).`
+    );
   };
 
   // --- Standalone Prompt Generation ---

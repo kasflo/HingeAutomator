@@ -441,7 +441,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // Proxy connectivity test — connects through ProxyEmpire, returns real IP + ping
+  // Proxy connectivity test — routes through ProxyEmpire gateway, returns real IP + ping
   app.get("/api/proxy-test", async (req, res) => {
     const { username, password } = req.query;
     if (!username || !password) return res.status(400).json({ ok: false, error: "username and password required" });
@@ -450,19 +450,17 @@ async function startServer() {
       const proxyUrl = `http://${encodeURIComponent(username as string)}:${encodeURIComponent(password as string)}@v2.proxyempire.io:5000`;
       const agent = new HttpsProxyAgent(proxyUrl);
       const start = Date.now();
-
-      // Promise.race ensures we always time out, even if the CONNECT phase hangs
+      // Promise.race guarantees timeout even if CONNECT phase hangs (axios timeout alone does not cover this)
       const response = await Promise.race([
         axios.get("https://api.ipify.org?format=json", {
           httpsAgent: agent,
-          proxy: false, // let https-proxy-agent handle it
+          proxy: false,
           timeout: TIMEOUT_MS,
         }),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(Object.assign(new Error("proxy timeout"), { code: "ETIMEDOUT" })), TIMEOUT_MS)
         ),
       ]);
-
       const ping = Date.now() - start;
       const ip = (response as any).data?.ip;
       if (!ip) return res.json({ ok: false, error: "No IP returned" });
