@@ -82,10 +82,16 @@ export default function App() {
   const [isCheckingBalance, setIsCheckingBalance] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [status, setStatus] = useState("Ready.");
-  const [selectedResult, setSelectedResult] = useState<ProxyResult | null>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [currentView, setCurrentView] = useState<'dashboard' | 'emails' | 'admin'>('dashboard');
   const [allEmails, setAllEmails] = useState<any[]>([]);
+
+  // --- Sidebar Panel State (null = collapsed, shows icons only) ---
+  const [openPanel, setOpenPanel] = useState<'proxy' | 'daisy' | null>(null);
+
+  // --- Fraud Check State ---
+  const [fraudCheckingFor, setFraudCheckingFor] = useState<string | null>(null);
 
   // --- Admin State ---
   const [adminUsers, setAdminUsers] = useState<any[]>([]);
@@ -478,7 +484,11 @@ export default function App() {
       });
     }
     
-    setResults(newResults);
+    // Preserve already-created profiles — they stay pinned at the top
+    setResults(prev => {
+      const created = prev.filter(r => !!r.phoneNumber);
+      return [...created, ...newResults];
+    });
 
     // Simulate the check process
     for (let i = 0; i < newResults.length; i++) {
@@ -486,19 +496,21 @@ export default function App() {
       await new Promise(r => setTimeout(r, 600));
       const randomCity = availableCities[Math.floor(Math.random() * availableCities.length)];
       
-      setResults(prev => prev.map((res, idx) => {
-        if (idx === i) {
+      const targetId = newResults[i].id; // match by stable ID — never touches created profiles
+      setResults(prev => prev.map((res) => {
+        if (res.id === targetId) {
           const sid = res.username.split("-sid-")[1] || Math.random().toString(36).substring(2, 10);
           const ispToken = proxyConfig.isp === "Verizon" ? "verizon+wireless" : "at&t+wireless";
           const updatedUsername = buildUsername(baseUser, randomCity.state_token, randomCity.city_token, sid, ispToken);
 
+          const ping = Math.floor(Math.random() * 70) + 18; // 18–87 ms (always under 99ms)
           return {
             ...res,
             city: randomCity.display,
             stateHint: randomCity.state_token,
             username: updatedUsername,
             ip: `172.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`,
-            ping: Math.floor(Math.random() * 150) + 50,
+            ping,
             status: "active",
             lat: 40.7128 + (Math.random() - 0.5) * 5,
             lon: -74.0060 + (Math.random() - 0.5) * 5
@@ -531,12 +543,6 @@ export default function App() {
         jobTitle: r.jobTitle || jobTitle,
         hingePrompts: prompts
       } : r));
-      setSelectedResult(prev => prev?.id === resultId ? {
-        ...prev,
-        nearbyPlace: prev.nearbyPlace || nearbyPlace,
-        jobTitle: prev.jobTitle || jobTitle,
-        hingePrompts: prompts
-      } : prev);
       setStatus("Profile created successfully.");
     } catch (error: any) {
       setStatus(`Warning: Could not generate prompts: ${error.message}`);
@@ -630,6 +636,28 @@ export default function App() {
         console.error("Polling error:", error);
       }
     }, 5000);
+  };
+
+  // --- Fraud Check ---
+  const runFraudCheck = async (resultId: string) => {
+    const result = results.find(r => r.id === resultId);
+    if (!result || !result.ip || result.ip === 'Checking...') {
+      setStatus("No valid IP for fraud check.");
+      return;
+    }
+    setFraudCheckingFor(resultId);
+    setStatus(`Checking fraud score for ${result.ip}...`);
+    try {
+      const res = await axios.get(`/api/fraud-check?ip=${result.ip}`);
+      const { score, risk } = res.data;
+      setResults(prev => prev.map(r => r.id === resultId ? { ...r, fraudScore: score, fraudRisk: risk } : r));
+      setStatus(`Fraud: ${score}/100 (${risk})`);
+      setTimeout(() => setStatus("Ready."), 3000);
+    } catch (err) {
+      setStatus("Fraud check failed.");
+    } finally {
+      setFraudCheckingFor(null);
+    }
   };
 
   // --- Admin Functions ---
@@ -918,203 +946,265 @@ export default function App() {
 
       <main className="max-w-[1600px] mx-auto px-4 py-6 grid grid-cols-12 gap-6 relative z-10">
         {currentView === 'dashboard' ? (
-          <>
-            {/* Left Column: Configuration */}
-        <div className="col-span-12 lg:col-span-3 space-y-6">
-          
-          {/* Proxy Config */}
-          <section className="bg-zinc-900/60 backdrop-blur-2xl border border-white/10 rounded-3xl p-6 space-y-6 shadow-2xl relative z-10">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-emerald-500/20 rounded-lg flex items-center justify-center border border-emerald-500/30">
-                <Shield className="w-4 h-4 text-emerald-400" />
-              </div>
-              <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-zinc-400">Proxy Settings</h2>
-            </div>
-            
-            <div className="space-y-6">
-              <div className="space-y-3">
-                <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">Base Username</label>
-                <input 
-                  type="text"
-                  value={proxyConfig.user}
-                  onChange={e => setProxyConfig({ ...proxyConfig, user: e.target.value })}
-                  placeholder="e.g. myuser123"
-                  className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-base focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-zinc-700"
-                />
-              </div>
-              
-              <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-3">
-                  <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">Password</label>
-                  <input 
-                    type="password"
-                    value={proxyConfig.pass}
-                    onChange={e => setProxyConfig({ ...proxyConfig, pass: e.target.value })}
-                    className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-base focus:outline-none focus:border-emerald-500/50 transition-all"
-                  />
-                </div>
-                <div className="space-y-3">
-                  <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">ISP</label>
-                  <div className="relative">
-                    <select 
-                      value={proxyConfig.isp}
-                      onChange={e => setProxyConfig({ ...proxyConfig, isp: e.target.value as any })}
-                      className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-base focus:outline-none focus:border-emerald-500/50 transition-all appearance-none cursor-pointer"
-                    >
-                      <option>Verizon</option>
-                      <option>AT&T</option>
-                    </select>
-                    <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600 pointer-events-none rotate-90" />
-                  </div>
-                </div>
-              </div>
+          <div className="col-span-12 flex gap-4 items-start">
 
-              <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-3">
-                  <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">Count</label>
-                  <input 
-                    type="number"
-                    value={proxyConfig.count}
-                    onChange={e => setProxyConfig({ ...proxyConfig, count: parseInt(e.target.value) })}
-                    className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-base focus:outline-none focus:border-emerald-500/50 transition-all"
-                  />
-                </div>
-                <div className="space-y-3">
-                  <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">State (Optional)</label>
-                  <input 
-                    type="text"
-                    value={proxyConfig.state}
-                    onChange={e => setProxyConfig({ ...proxyConfig, state: e.target.value })}
-                    placeholder="e.g. california"
-                    className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-base focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-zinc-700"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <button 
-              onClick={startProxySearch}
-              disabled={isSearching}
-              className="w-full bg-emerald-500 text-black font-bold py-4 rounded-2xl hover:bg-emerald-400 transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed group shadow-xl shadow-emerald-500/20 active:scale-[0.98]"
-            >
-              {isSearching ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5 group-hover:scale-110 transition-transform" />}
-              <span className="tracking-wide">Start Proxy Search</span>
-            </button>
-          </section>
-
-          {/* DaisySMS Config */}
-          <section className="bg-zinc-900/60 backdrop-blur-2xl border border-white/10 rounded-3xl p-6 space-y-6 shadow-2xl relative z-10">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-blue-500/20 rounded-lg flex items-center justify-center border border-blue-500/30">
-                  <Phone className="w-4 h-4 text-blue-400" />
-                </div>
-                <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-zinc-400">DaisySMS</h2>
-              </div>
-              <button 
-                onClick={checkBalance}
-                disabled={isCheckingBalance || !daisyConfig.apiKey}
-                className="text-xs font-bold uppercase tracking-widest text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-2 group"
-              >
-                <RefreshCw className={cn("w-3 h-3", isCheckingBalance && "animate-spin")} />
-                Check Balance
-              </button>
-            </div>
-            
-            <div className="space-y-6">
-              {balance && (
-                <motion.div 
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl flex items-center justify-between shadow-inner"
+          {/* ── Animated Sidebar ── */}
+          <motion.aside
+            animate={{ width: openPanel !== null ? 292 : 64 }}
+            transition={{ duration: 0.28, ease: [0.32, 0.72, 0, 1] }}
+            className="shrink-0"
+            style={{ overflow: 'hidden' }}
+          >
+            <AnimatePresence mode="wait">
+              {openPanel === null ? (
+                /* Collapsed: two icon pill buttons */
+                <motion.div
+                  key="icons"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.14 }}
+                  className="flex flex-col gap-3 w-16"
                 >
-                  <span className="text-xs font-bold uppercase tracking-widest text-blue-400/80">Balance</span>
-                  <span className="text-lg font-bold text-white tracking-tight">${balance}</span>
+                  <button
+                    onClick={() => setOpenPanel('proxy')}
+                    title="Proxy Settings"
+                    className="w-14 h-14 bg-zinc-900/60 backdrop-blur-2xl border border-white/10 rounded-2xl flex items-center justify-center text-emerald-400 hover:bg-emerald-500/10 hover:border-emerald-500/30 shadow-xl transition-all active:scale-95 group"
+                  >
+                    <Shield className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                  </button>
+                  <button
+                    onClick={() => setOpenPanel('daisy')}
+                    title="DaisySMS"
+                    className="w-14 h-14 bg-zinc-900/60 backdrop-blur-2xl border border-white/10 rounded-2xl flex items-center justify-center text-blue-400 hover:bg-blue-500/10 hover:border-blue-500/30 shadow-xl transition-all active:scale-95 group"
+                  >
+                    <Phone className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                  </button>
+                </motion.div>
+              ) : openPanel === 'proxy' ? (
+                /* Proxy Settings Panel */
+                <motion.div
+                  key="proxy"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.18, delay: 0.1 }}
+                  className="w-[292px] bg-zinc-900/60 backdrop-blur-2xl border border-white/10 rounded-3xl shadow-2xl overflow-hidden"
+                >
+                  <div className="flex items-center gap-3 px-5 py-4 border-b border-white/5">
+                    <div className="w-8 h-8 bg-emerald-500/20 rounded-lg flex items-center justify-center border border-emerald-500/30 shrink-0">
+                      <Shield className="w-4 h-4 text-emerald-400" />
+                    </div>
+                    <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-zinc-400 flex-1">Proxy Settings</h2>
+                    <button
+                      onClick={() => setOpenPanel(null)}
+                      className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 text-zinc-500 hover:text-white transition-all active:scale-95"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="p-5 space-y-4 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 210px)' }}>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">Base Username</label>
+                      <input
+                        type="text"
+                        value={proxyConfig.user}
+                        onChange={e => setProxyConfig({ ...proxyConfig, user: e.target.value })}
+                        placeholder="e.g. myuser123"
+                        className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-zinc-700"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">Password</label>
+                        <input
+                          type="password"
+                          value={proxyConfig.pass}
+                          onChange={e => setProxyConfig({ ...proxyConfig, pass: e.target.value })}
+                          className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-emerald-500/50 transition-all"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">ISP</label>
+                        <div className="relative">
+                          <select
+                            value={proxyConfig.isp}
+                            onChange={e => setProxyConfig({ ...proxyConfig, isp: e.target.value as any })}
+                            className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-emerald-500/50 transition-all appearance-none cursor-pointer"
+                          >
+                            <option>Verizon</option>
+                            <option>AT&T</option>
+                          </select>
+                          <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-600 pointer-events-none rotate-90" />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">Count</label>
+                        <input
+                          type="number"
+                          value={proxyConfig.count}
+                          onChange={e => setProxyConfig({ ...proxyConfig, count: parseInt(e.target.value) })}
+                          className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-emerald-500/50 transition-all"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">State</label>
+                        <input
+                          type="text"
+                          value={proxyConfig.state}
+                          onChange={e => setProxyConfig({ ...proxyConfig, state: e.target.value })}
+                          placeholder="optional"
+                          className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-emerald-500/50 transition-all placeholder:text-zinc-700"
+                        />
+                      </div>
+                    </div>
+                    <button
+                      onClick={startProxySearch}
+                      disabled={isSearching}
+                      className="w-full bg-emerald-500 text-black font-bold py-3.5 rounded-2xl hover:bg-emerald-400 transition-all flex items-center justify-center gap-2.5 disabled:opacity-50 disabled:cursor-not-allowed group shadow-lg shadow-emerald-500/20 active:scale-[0.98]"
+                    >
+                      {isSearching ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4 group-hover:scale-110 transition-transform" />}
+                      <span className="tracking-wide text-sm">Start Proxy Search</span>
+                    </button>
+                    <button
+                      onClick={() => setOpenPanel('daisy')}
+                      className="w-full flex items-center gap-2 px-4 py-3 bg-blue-500/5 hover:bg-blue-500/10 border border-blue-500/15 hover:border-blue-500/25 rounded-2xl text-blue-400/60 hover:text-blue-400 text-xs font-bold uppercase tracking-widest transition-all group"
+                    >
+                      <Phone className="w-3.5 h-3.5" />
+                      <span>DaisySMS</span>
+                      <ChevronRight className="w-3.5 h-3.5 ml-auto opacity-40 group-hover:opacity-80 transition-opacity" />
+                    </button>
+                  </div>
+                </motion.div>
+              ) : (
+                /* DaisySMS Panel */
+                <motion.div
+                  key="daisy"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.18, delay: 0.1 }}
+                  className="w-[292px] bg-zinc-900/60 backdrop-blur-2xl border border-white/10 rounded-3xl shadow-2xl overflow-hidden"
+                >
+                  <div className="flex items-center gap-3 px-5 py-4 border-b border-white/5">
+                    <div className="w-8 h-8 bg-blue-500/20 rounded-lg flex items-center justify-center border border-blue-500/30 shrink-0">
+                      <Phone className="w-4 h-4 text-blue-400" />
+                    </div>
+                    <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-zinc-400 flex-1">DaisySMS</h2>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={checkBalance}
+                        disabled={isCheckingBalance || !daisyConfig.apiKey}
+                        className="text-[10px] font-bold uppercase tracking-widest text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 disabled:opacity-40"
+                      >
+                        <RefreshCw className={cn("w-2.5 h-2.5", isCheckingBalance && "animate-spin")} />
+                        Balance
+                      </button>
+                      <button
+                        onClick={() => setOpenPanel(null)}
+                        className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 text-zinc-500 hover:text-white transition-all active:scale-95"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="p-5 space-y-4 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 210px)' }}>
+                    {balance && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-2xl flex items-center justify-between"
+                      >
+                        <span className="text-xs font-bold uppercase tracking-widest text-blue-400/80">Balance</span>
+                        <span className="text-base font-bold text-white">${balance}</span>
+                      </motion.div>
+                    )}
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">API Key</label>
+                      <input
+                        type="password"
+                        value={daisyConfig.apiKey}
+                        onChange={e => setDaisyConfig({ ...daisyConfig, apiKey: e.target.value })}
+                        className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500/50 transition-all"
+                        placeholder="Enter API Key"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">Service</label>
+                        <div className="relative">
+                          <select
+                            value={["vz","oi","mo","tg","wa","go","fb","ig","tw","lf","fu","ds","ub","ll"].includes(daisyConfig.service) ? daisyConfig.service : "custom"}
+                            onChange={e => {
+                              const val = e.target.value;
+                              setDaisyConfig({ ...daisyConfig, service: val === "custom" ? "" : val });
+                            }}
+                            className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500/50 transition-all appearance-none cursor-pointer"
+                          >
+                            <option value="vz">Hinge</option>
+                            <option value="oi">Tinder</option>
+                            <option value="mo">Bumble</option>
+                            <option value="tg">Telegram</option>
+                            <option value="wa">WhatsApp</option>
+                            <option value="go">Google</option>
+                            <option value="fb">Facebook</option>
+                            <option value="ig">Instagram</option>
+                            <option value="tw">Twitter</option>
+                            <option value="lf">TikTok</option>
+                            <option value="fu">Snapchat</option>
+                            <option value="ds">DoorDash</option>
+                            <option value="ub">Uber</option>
+                            <option value="ll">Lyft</option>
+                            <option value="custom">Custom...</option>
+                          </select>
+                          <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-600 pointer-events-none rotate-90" />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">Max Price</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. 0.25"
+                          value={daisyConfig.maxPrice || ""}
+                          onChange={e => setDaisyConfig({ ...daisyConfig, maxPrice: e.target.value })}
+                          className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500/50 transition-all"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">Carrier (Optional)</label>
+                      <div className="relative">
+                        <select
+                          value={daisyConfig.carriers || ""}
+                          onChange={e => setDaisyConfig({ ...daisyConfig, carriers: e.target.value || undefined })}
+                          className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500/50 transition-all appearance-none cursor-pointer"
+                        >
+                          <option value="">Any Carrier</option>
+                          <option value="vz">Verizon</option>
+                          <option value="att">AT&T</option>
+                          <option value="tmo">T-Mobile</option>
+                        </select>
+                        <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-600 pointer-events-none rotate-90" />
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setOpenPanel('proxy')}
+                      className="w-full flex items-center gap-2 px-4 py-3 bg-emerald-500/5 hover:bg-emerald-500/10 border border-emerald-500/15 hover:border-emerald-500/25 rounded-2xl text-emerald-400/60 hover:text-emerald-400 text-xs font-bold uppercase tracking-widest transition-all group"
+                    >
+                      <Shield className="w-3.5 h-3.5" />
+                      <span>Proxy Settings</span>
+                      <ChevronRight className="w-3.5 h-3.5 ml-auto opacity-40 group-hover:opacity-80 transition-opacity" />
+                    </button>
+                  </div>
                 </motion.div>
               )}
-              
-              <div className="space-y-3">
-                <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">API Key</label>
-                <input 
-                  type="password"
-                  value={daisyConfig.apiKey}
-                  onChange={e => setDaisyConfig({ ...daisyConfig, apiKey: e.target.value })}
-                  className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-base focus:outline-none focus:border-blue-500/50 transition-all"
-                  placeholder="Enter API Key"
-                />
-              </div>
-              
-              <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-3">
-                  <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">Service</label>
-                  <div className="relative">
-                    <select 
-                      value={["vz", "oi", "mo", "tg", "wa", "go", "fb", "ig", "tw", "lf", "fu", "ds", "ub", "ll"].includes(daisyConfig.service) ? daisyConfig.service : "custom"}
-                      onChange={e => {
-                        const val = e.target.value;
-                        if (val === "custom") {
-                          setDaisyConfig({ ...daisyConfig, service: "" });
-                        } else {
-                          setDaisyConfig({ ...daisyConfig, service: val });
-                        }
-                      }}
-                      className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-base focus:outline-none focus:border-blue-500/50 transition-all appearance-none cursor-pointer"
-                    >
-                      <option value="vz">Hinge</option>
-                      <option value="oi">Tinder</option>
-                      <option value="mo">Bumble</option>
-                      <option value="tg">Telegram</option>
-                      <option value="wa">WhatsApp</option>
-                      <option value="go">Google</option>
-                      <option value="fb">Facebook</option>
-                      <option value="ig">Instagram</option>
-                      <option value="tw">Twitter</option>
-                      <option value="lf">TikTok</option>
-                      <option value="fu">Snapchat</option>
-                      <option value="ds">DoorDash</option>
-                      <option value="ub">Uber</option>
-                      <option value="ll">Lyft</option>
-                      <option value="custom">Custom...</option>
-                    </select>
-                    <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600 pointer-events-none rotate-90" />
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">Max Price</label>
-                  <input 
-                    type="text"
-                    placeholder="e.g. 2.50"
-                    value={daisyConfig.maxPrice || ""}
-                    onChange={e => setDaisyConfig({ ...daisyConfig, maxPrice: e.target.value })}
-                    className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-base focus:outline-none focus:border-blue-500/50 transition-all"
-                  />
-                </div>
-              </div>
+            </AnimatePresence>
+          </motion.aside>
 
-              <div className="space-y-2">
-                <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">Carrier (Optional)</label>
-                <div className="relative">
-                    <select 
-                      value={daisyConfig.carriers || ""}
-                      onChange={e => setDaisyConfig({ ...daisyConfig, carriers: e.target.value || undefined })}
-                      className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-3.5 text-sm focus:outline-none focus:border-blue-500/50 transition-all appearance-none cursor-pointer"
-                    >
-                      <option value="">Any Carrier</option>
-                      <option value="vz">Verizon</option>
-                      <option value="att">AT&T</option>
-                      <option value="tmo">T-Mobile</option>
-                    </select>
-                  <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600 pointer-events-none rotate-90" />
-                </div>
-              </div>
-
-            </div>
-          </section>
-
-        </div>
-
-        {/* Right Column: Results */}
-        <div className="col-span-12 lg:col-span-9 space-y-6">
+          {/* Main Content */}
+          <div className="flex-1 min-w-0 space-y-6">
           
           {/* Progress Bar */}
           <AnimatePresence>
@@ -1150,14 +1240,17 @@ export default function App() {
                 </div>
                 <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-zinc-300">Active Proxies & Profiles</h3>
               </div>
-              <div className="flex gap-3">
-                <button 
-                  onClick={() => setResults([])}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-white/5 hover:bg-red-500/20 rounded-2xl text-zinc-400 hover:text-red-400 border border-white/5 hover:border-red-500/30 transition-all active:scale-95 text-xs font-bold uppercase tracking-widest"
-                  title="Clear Results"
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setResults(prev => prev.filter(r => !!r.phoneNumber));
+                    setExpandedIds(new Set());
+                  }}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-white/5 hover:bg-red-500/20 rounded-2xl text-zinc-400 hover:text-red-400 border border-white/5 hover:border-red-500/30 transition-all active:scale-95 text-xs font-bold uppercase tracking-widest"
+                  title="Clear all non-created proxies (created profiles stay)"
                 >
                   <Trash2 className="w-4 h-4" />
-                  Clear Results
+                  Clear
                 </button>
               </div>
             </div>
@@ -1166,22 +1259,29 @@ export default function App() {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="text-xs font-bold uppercase tracking-[0.2em] text-zinc-500 border-b border-white/5 bg-white/[0.02]">
-                    <th className="px-6 py-5 w-16 text-center">Status</th>
-                    <th className="px-6 py-5">City & Network</th>
-                    <th className="px-6 py-5">Proxy Auth</th>
-                    <th className="px-6 py-5">Phone / SMS</th>
-                    <th className="px-6 py-5 text-right">Actions</th>
+                    <th className="px-6 py-3 w-16 text-center">Status</th>
+                    <th className="px-6 py-3">City & Network</th>
+                    <th className="px-6 py-3">Proxy Auth</th>
+                    <th className="px-6 py-3">Phone / SMS</th>
+                    <th className="px-6 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   <>
-                    {results.map((res) => (
+                    {[...results]
+                      .sort((a, b) => (!!b.phoneNumber ? 1 : 0) - (!!a.phoneNumber ? 1 : 0))
+                      .map((res) => (
                       <React.Fragment key={res.id}>
                       <motion.tr
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.95 }}
-                        className="group hover:bg-white/[0.03] transition-colors"
+                        className={cn(
+                          "group transition-colors",
+                          res.phoneNumber
+                            ? "bg-emerald-500/[0.04] hover:bg-emerald-500/[0.07] border-l-2 border-l-emerald-500/40"
+                            : "hover:bg-white/[0.03]"
+                        )}
                       >
                         <td className="px-6 py-5 text-center">
                           <div className="flex justify-center">
@@ -1194,25 +1294,49 @@ export default function App() {
                             )}
                           </div>
                         </td>
-                        <td className="px-6 py-5">
-                          <div className="flex flex-col gap-2.5">
-                            <span className="text-sm font-bold text-white tracking-tight truncate max-w-[180px]">{res.city}</span>
-                            <div className="flex items-center gap-2.5">
+                        <td className="px-6 py-3">
+                          <div className="flex flex-col gap-2">
+                            <span className="text-sm font-bold text-white tracking-tight truncate max-w-[200px]">{res.city}</span>
+                            <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-xs font-mono text-zinc-500 bg-white/5 px-2.5 py-1 rounded border border-white/5 truncate max-w-[130px]">{res.ip}</span>
                               {res.ping && (
                                 <span className={cn(
                                   "text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider border shadow-sm",
-                                  res.ping < 100 
-                                    ? "text-emerald-400 bg-emerald-400/10 border-emerald-400/20 shadow-emerald-500/5" 
-                                    : "text-amber-400 bg-amber-400/10 border-amber-400/20 shadow-amber-500/5"
+                                  res.ping < 100
+                                    ? "text-emerald-400 bg-emerald-400/10 border-emerald-400/20"
+                                    : "text-amber-400 bg-amber-400/10 border-amber-400/20"
                                 )}>
                                   {res.ping}ms
                                 </span>
                               )}
+                              {/* Inline fraud check button */}
+                              <button
+                                onClick={() => runFraudCheck(res.id)}
+                                disabled={fraudCheckingFor === res.id || res.status === 'pending'}
+                                className={cn(
+                                  "p-1.5 rounded-lg border transition-all active:scale-95 disabled:opacity-40",
+                                  res.fraudScore != null
+                                    ? "bg-white/5 border-white/5 text-zinc-500 hover:text-white hover:bg-white/10"
+                                    : "bg-violet-500/10 border-violet-500/20 text-violet-400 hover:bg-violet-500/20"
+                                )}
+                                title={res.fraudScore != null ? `Fraud: ${res.fraudScore}/100 (${res.fraudRisk})` : "Run Fraud Check"}
+                              >
+                                {fraudCheckingFor === res.id
+                                  ? <RefreshCw className="w-3 h-3 animate-spin" />
+                                  : <ShieldCheck className="w-3 h-3" />}
+                              </button>
                             </div>
+                            {res.fraudScore != null && (
+                              <span className={cn(
+                                "text-[10px] font-black uppercase tracking-wider",
+                                res.fraudScore < 40 ? "text-emerald-400" : res.fraudScore < 70 ? "text-yellow-400" : "text-red-400"
+                              )}>
+                                {res.fraudScore}/100 · {res.fraudRisk}
+                              </span>
+                            )}
                           </div>
                         </td>
-                        <td className="px-6 py-5">
+                        <td className="px-6 py-3">
                           <div className="flex flex-col gap-2.5">
                             <span className="text-xs font-bold uppercase tracking-wider text-zinc-500">Proxy Auth</span>
                             <div className="flex items-center gap-2.5">
@@ -1223,7 +1347,7 @@ export default function App() {
                             </div>
                           </div>
                         </td>
-                        <td className="px-6 py-5">
+                        <td className="px-6 py-3">
                           <div className="flex flex-col gap-2.5">
                             <span className="text-xs font-bold uppercase tracking-wider text-zinc-500">Phone / SMS</span>
                             {res.phoneNumber ? (
@@ -1249,18 +1373,36 @@ export default function App() {
                           </div>
                         </td>
                         <td className="px-6 py-5 text-right">
-                          <div className="flex items-center justify-end gap-3">
+                          <div className="flex items-center justify-end gap-2">
+                            {/* Delete button — only on created profiles */}
+                            {res.phoneNumber && (
+                              <button
+                                onClick={() => {
+                                  setResults(prev => prev.filter(r => r.id !== res.id));
+                                  setExpandedIds(prev => { const n = new Set(prev); n.delete(res.id); return n; });
+                                }}
+                                className="p-2 rounded-xl border bg-red-500/10 border-red-500/15 text-red-400/50 hover:text-red-400 hover:bg-red-500/20 hover:border-red-500/30 transition-all active:scale-95"
+                                title="Delete Profile"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                            {/* Expand toggle */}
                             <button
-                              onClick={() => setSelectedResult(selectedResult?.id === res.id ? null : res)}
+                              onClick={() => setExpandedIds(prev => {
+                                const n = new Set(prev);
+                                n.has(res.id) ? n.delete(res.id) : n.add(res.id);
+                                return n;
+                              })}
                               className={cn(
                                 "p-2 rounded-xl border transition-all active:scale-95",
-                                selectedResult?.id === res.id
+                                expandedIds.has(res.id)
                                   ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-400"
                                   : "bg-white/5 hover:bg-white/10 border-white/5 text-zinc-400 hover:text-white"
                               )}
-                              title={selectedResult?.id === res.id ? "Collapse" : "View Profile"}
+                              title={expandedIds.has(res.id) ? "Collapse" : "View Profile"}
                             >
-                              <ChevronRight className={cn("w-4 h-4 transition-transform", selectedResult?.id === res.id && "rotate-90")} />
+                              <ChevronRight className={cn("w-4 h-4 transition-transform", expandedIds.has(res.id) && "rotate-90")} />
                             </button>
                             <button
                               onClick={() => createProfile(res.id)}
@@ -1268,88 +1410,68 @@ export default function App() {
                               className={cn(
                                 "px-5 py-2.5 text-xs font-black uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-95",
                                 res.phoneNumber
-                                  ? "bg-white/5 text-zinc-500 border border-white/5 cursor-default"
+                                  ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 cursor-default shadow-emerald-500/10"
                                   : "bg-emerald-500 text-black hover:bg-emerald-400 shadow-emerald-500/20"
                               )}
                             >
-                              {res.phoneNumber ? "Active" : "Create"}
+                              {res.phoneNumber ? "✓ Active" : "Create"}
                             </button>
                           </div>
                         </td>
                       </motion.tr>
                       {/* ── Inline Profile Expand ── */}
-                        {selectedResult?.id === res.id && (
-                          <tr>
+                        {expandedIds.has(res.id) && (
+                          <tr className="!border-t-0">
                             <td colSpan={5} className="px-0 py-0">
                               <motion.div
                                 initial={{ height: 0, opacity: 0 }}
                                 animate={{ height: "auto", opacity: 1 }}
                                 exit={{ height: 0, opacity: 0 }}
-                                transition={{ duration: 0.25, ease: "easeInOut" }}
+                                transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }}
                                 style={{ overflow: "hidden" }}
                               >
-                                <div className="mx-4 mb-4 bg-zinc-900/80 border border-white/10 rounded-3xl overflow-hidden shadow-xl">
-                                  {/* Profile Header */}
-                                  <div className="px-7 py-5 border-b border-white/5 bg-white/[0.02] flex items-center gap-5">
-                                    <div className="w-11 h-11 bg-emerald-500/20 rounded-2xl flex items-center justify-center border border-emerald-500/30">
-                                      <User className="w-5 h-5 text-emerald-400" />
-                                    </div>
-                                    <div>
-                                      <div className="flex items-center gap-3 mb-0.5">
-                                        <h3 className="text-lg font-semibold text-white tracking-wide">Profile: {selectedResult.city}</h3>
-                                        <span className="px-2.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[10px] font-black text-emerald-400 uppercase tracking-[0.2em]">Active</span>
-                                      </div>
-                                      <p className="text-xs text-zinc-500 font-mono tracking-widest uppercase opacity-60">{selectedResult.username}</p>
-                                    </div>
-                                  </div>
-
-                                  <div className="p-7 space-y-7">
-                                    {/* Meta Info */}
-                                    <div className="grid grid-cols-2 gap-4">
-                                      <div className="bg-white/[0.03] p-4 rounded-2xl border border-white/5 flex items-center gap-4">
-                                        <div className="w-9 h-9 bg-emerald-500/10 rounded-xl flex items-center justify-center border border-emerald-500/20">
-                                          <MapPin className="w-4 h-4 text-emerald-500/60" />
-                                        </div>
-                                        <div>
-                                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 block mb-0.5">Nearby Place</span>
-                                          <p className="text-sm font-bold text-white">{selectedResult.nearbyPlace || "—"}</p>
+                                <div className={cn(
+                                  "mx-3 mb-2 rounded-b-2xl overflow-hidden border-x border-b",
+                                  res.phoneNumber
+                                    ? "border-white/[0.07] bg-zinc-900/50"
+                                    : "border-white/5 bg-zinc-950/60"
+                                )}>
+                                  <div className="flex items-stretch gap-0">
+                                    {/* Meta chips — fixed width so prompts always start at same column */}
+                                    <div className="flex flex-col gap-1.5 shrink-0 w-[270px] p-3 border-r border-white/5">
+                                      <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white/[0.03]">
+                                        <MapPin className="w-3 h-3 text-zinc-500 shrink-0" />
+                                        <div className="min-w-0">
+                                          <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold leading-none mb-0.5">Nearby</div>
+                                          <div className="text-[11px] font-semibold text-zinc-200 whitespace-nowrap">{res.nearbyPlace || "—"}</div>
                                         </div>
                                       </div>
-                                      <div className="bg-white/[0.03] p-4 rounded-2xl border border-white/5 flex items-center gap-4">
-                                        <div className="w-9 h-9 bg-emerald-500/10 rounded-xl flex items-center justify-center border border-emerald-500/20">
-                                          <Briefcase className="w-4 h-4 text-emerald-500/60" />
-                                        </div>
-                                        <div>
-                                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 block mb-0.5">Job Title</span>
-                                          <p className="text-sm font-bold text-white">{selectedResult.jobTitle || "—"}</p>
+                                      <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white/[0.03]">
+                                        <Briefcase className="w-3 h-3 text-zinc-500 shrink-0" />
+                                        <div className="min-w-0">
+                                          <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold leading-none mb-0.5">Job</div>
+                                          <div className="text-[11px] font-semibold text-zinc-200 whitespace-nowrap">{res.jobTitle || "—"}</div>
                                         </div>
                                       </div>
                                     </div>
 
-                                    {/* Hinge Prompts */}
-                                    <div className="space-y-4">
-                                      <div className="flex items-center gap-3">
-                                        <div className="w-7 h-7 bg-emerald-500/20 rounded-xl flex items-center justify-center border border-emerald-500/30">
-                                          <RefreshCw className="w-4 h-4 text-emerald-400" />
-                                        </div>
-                                        <h4 className="text-xs font-black uppercase tracking-[0.2em] text-zinc-400">Generated Hinge Prompts</h4>
-                                      </div>
-
-                                      {selectedResult.hingePrompts ? (
-                                        <div className="grid grid-cols-3 gap-5">
-                                          {Object.entries(selectedResult.hingePrompts).map(([title, options]) => (
-                                            <div key={title} className="space-y-3 bg-white/[0.02] p-5 rounded-2xl border border-white/5">
-                                              <h5 className="text-[10px] font-black text-emerald-500/60 uppercase tracking-[0.2em]">{title}</h5>
-                                              <div className="space-y-2.5">
-                                                {(options as string[]).map((opt, i) => (
+                                    {/* Prompts area — always starts at same x position */}
+                                    <div className="flex-1 min-w-0 p-3">
+                                      {res.hingePrompts ? (
+                                        <div className="flex gap-2 h-full" style={{ scrollbarWidth: 'none' }}>
+                                          {Object.entries(res.hingePrompts).map(([title, options]) => (
+                                            <div key={title} className="flex-1 min-w-0 space-y-1">
+                                              <h5 className="text-[9px] font-black text-zinc-500 uppercase tracking-widest px-0.5">{title}</h5>
+                                              <div className="space-y-1">
+                                                {(options as string[]).slice(0, 3).map((opt, i) => (
                                                   <button
                                                     key={i}
                                                     onClick={() => copyToClipboard(opt.replace(" — great answer", ""), "Prompt")}
                                                     className={cn(
-                                                      "w-full text-left p-3.5 rounded-xl text-xs font-medium transition-all border active:scale-[0.98]",
+                                                      "w-full text-left px-2.5 py-1.5 rounded-lg text-[11px] transition-all active:scale-[0.98] leading-snug",
                                                       opt.includes("great answer")
-                                                        ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
-                                                        : "bg-white/5 border-white/5 text-zinc-400 hover:border-white/10 hover:bg-white/[0.08] hover:text-white"
+                                                        ? "text-emerald-400 bg-emerald-950/60 border border-emerald-500/20 hover:bg-emerald-950/80"
+                                                        : "text-zinc-400 bg-transparent border border-zinc-800 hover:border-zinc-600 hover:text-zinc-200"
                                                     )}
                                                   >
                                                     {opt}
@@ -1360,18 +1482,18 @@ export default function App() {
                                           ))}
                                         </div>
                                       ) : (
-                                        <div className="flex items-center justify-center gap-4 py-8 border border-dashed border-white/10 rounded-2xl bg-white/[0.01]">
-                                          {generatingPromptsFor === selectedResult.id ? (
-                                            <>
-                                              <RefreshCw className="w-5 h-5 text-zinc-600 animate-spin" />
-                                              <span className="text-xs font-bold uppercase tracking-widest text-zinc-600">Generating prompts...</span>
-                                            </>
+                                        <div className="flex items-center gap-3 h-full">
+                                          {generatingPromptsFor === res.id ? (
+                                            <div className="flex items-center gap-2 text-zinc-500">
+                                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                              <span className="text-xs font-bold uppercase tracking-widest">Generating...</span>
+                                            </div>
                                           ) : (
                                             <button
-                                              onClick={() => generatePromptsForResult(selectedResult.id)}
-                                              className="flex items-center gap-2 px-5 py-2.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-xl text-xs font-black uppercase tracking-widest transition-all border border-emerald-500/30 active:scale-95"
+                                              onClick={() => generatePromptsForResult(res.id)}
+                                              className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-xl text-xs font-black uppercase tracking-widest transition-all border border-emerald-500/20 active:scale-95"
                                             >
-                                              <RefreshCw className="w-3.5 h-3.5" />
+                                              <RefreshCw className="w-3 h-3" />
                                               Generate Prompts
                                             </button>
                                           )}
@@ -1403,8 +1525,8 @@ export default function App() {
               </table>
             </div>
           </div>
+          </div>
         </div>
-      </>
     ) : currentView === 'emails' ? (
           <div className="col-span-12 space-y-6">
             <div className="bg-zinc-900/60 backdrop-blur-2xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl relative z-10">
@@ -1717,139 +1839,6 @@ export default function App() {
     )}
       </main>
 
-      {/* (modal removed — profile is now inline expandable row) */}
-      {false && selectedResult && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSelectedResult(null)}
-              className="absolute inset-0 bg-black/60 backdrop-blur-xl"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9, y: 40 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 40 }}
-              className="relative w-full max-w-6xl bg-[#0a0a0a]/95 backdrop-blur-3xl border border-white/10 rounded-[2.5rem] overflow-hidden shadow-[0_0_80px_rgba(0,0,0,0.8)] max-h-[92vh] flex flex-col"
-            >
-              <div className="p-8 border-b border-white/5 flex items-center justify-between shrink-0 bg-white/[0.02]">
-                <div className="flex items-center gap-8">
-                  <div className="w-14 h-14 bg-emerald-500/20 rounded-2xl flex items-center justify-center border border-emerald-500/30 shadow-lg shadow-emerald-500/10">
-                    <User className="w-7 h-7 text-emerald-400" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-4 mb-1.5">
-                      <h2 className="text-2xl font-semibold text-white tracking-wide">Profile: {selectedResult.city}</h2>
-                      <span className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-xs font-black text-emerald-400 uppercase tracking-[0.2em] shadow-sm">Active</span>
-                    </div>
-                    <p className="text-xs text-zinc-500 font-mono tracking-[0.15em] uppercase opacity-60">{selectedResult.username}</p>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => setSelectedResult(null)}
-                  className="p-3 bg-white/5 hover:bg-white/10 rounded-2xl border border-white/5 transition-all active:scale-95 group"
-                >
-                  <X className="w-6 h-6 text-zinc-400 group-hover:text-white transition-colors" />
-                </button>
-              </div>
-
-              <div className="p-8 overflow-y-auto custom-scrollbar flex-1">
-                <div className="grid grid-cols-1 gap-8">
-                  {/* Meta Info Row */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="bg-white/[0.03] p-6 rounded-[2rem] border border-white/5 shadow-inner flex items-center gap-6">
-                      <div className="w-12 h-12 bg-emerald-500/10 rounded-2xl flex items-center justify-center border border-emerald-500/20">
-                        <MapPin className="w-6 h-6 text-emerald-500/60" />
-                      </div>
-                      <div>
-                        <span className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-500 block mb-1">Nearby Place</span>
-                        <p className="text-lg font-bold text-white tracking-tight">{selectedResult.nearbyPlace || "—"}</p>
-                      </div>
-                    </div>
-                    <div className="bg-white/[0.03] p-6 rounded-[2rem] border border-white/5 shadow-inner flex items-center gap-6">
-                      <div className="w-12 h-12 bg-emerald-500/10 rounded-2xl flex items-center justify-center border border-emerald-500/20">
-                        <Briefcase className="w-6 h-6 text-emerald-500/60" />
-                      </div>
-                      <div>
-                        <span className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-500 block mb-1">Job Title</span>
-                        <p className="text-lg font-bold text-white tracking-tight">{selectedResult.jobTitle || "—"}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Hinge Prompts Section */}
-                  <div className="space-y-6">
-                    <div className="flex items-center gap-4">
-                      <div className="w-8 h-8 bg-emerald-500/20 rounded-xl flex items-center justify-center border border-emerald-500/30">
-                        <RefreshCw className="w-5 h-5 text-emerald-400" />
-                      </div>
-                      <h3 className="text-sm font-black uppercase tracking-[0.25em] text-zinc-400">Generated Hinge Prompts</h3>
-                    </div>
-                    
-                    {selectedResult.hingePrompts ? (
-                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                        {Object.entries(selectedResult.hingePrompts).map(([title, options]) => (
-                          <div key={title} className="space-y-5 bg-white/[0.02] p-6 rounded-[2.5rem] border border-white/5">
-                            <div className="flex items-center justify-between px-2">
-                              <h4 className="text-[11px] font-black text-emerald-500/60 uppercase tracking-[0.2em]">{title}</h4>
-                              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500/40" />
-                            </div>
-                            <div className="space-y-3.5">
-                              {(options as string[]).map((opt, i) => (
-                                <button 
-                                  key={i}
-                                  onClick={() => copyToClipboard(opt.replace(" — great answer", ""), "Prompt")}
-                                  className={cn(
-                                    "w-full text-left p-5 rounded-2xl text-sm font-medium transition-all border shadow-sm active:scale-[0.98] group relative overflow-hidden",
-                                    opt.includes("great answer") 
-                                      ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.1)]" 
-                                      : "bg-white/5 border-white/5 text-zinc-400 hover:border-white/10 hover:bg-white/[0.08] hover:text-white"
-                                  )}
-                                >
-                                  <div className="relative z-10 leading-relaxed">
-                                    {opt}
-                                  </div>
-                                  {opt.includes("great answer") && (
-                                    <div className="absolute top-0 right-0 p-1">
-                                      <div className="w-1 h-1 rounded-full bg-emerald-500" />
-                                    </div>
-                                  )}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="h-64 flex flex-col items-center justify-center gap-6 text-zinc-600 border border-dashed border-white/10 rounded-[3rem] p-10 bg-white/[0.01]">
-                        {generatingPromptsFor === selectedResult.id ? (
-                          <>
-                            <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center animate-pulse">
-                              <RefreshCw className="w-10 h-10 opacity-20" />
-                            </div>
-                            <p className="text-sm text-center font-bold uppercase tracking-widest opacity-40">Generating prompts...</p>
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              onClick={() => generatePromptsForResult(selectedResult.id)}
-                              className="flex items-center gap-2 px-6 py-3 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 rounded-2xl text-xs font-black uppercase tracking-widest transition-all border border-emerald-500/30 active:scale-95"
-                            >
-                              <RefreshCw className="w-4 h-4" />
-                              Generate Prompts
-                            </button>
-                            <p className="text-xs text-center font-bold uppercase tracking-widest opacity-30">No prompts generated yet</p>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-      )}
     </div>
   );
 }

@@ -31,6 +31,8 @@ export interface ProxyResult {
   jobTitle?: string;
   hingePrompts?: Record<string, string[]>;
   note?: string;
+  fraudScore?: number;
+  fraudRisk?: string;
 }
 
 export interface DaisySMSConfig {
