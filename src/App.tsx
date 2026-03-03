@@ -92,6 +92,7 @@ export default function App() {
 
   // --- Fraud Check State ---
   const [fraudCheckingFor, setFraudCheckingFor] = useState<string | null>(null);
+  const [copiedProxyId, setCopiedProxyId] = useState<string | null>(null);
 
   // --- Admin State ---
   const [adminUsers, setAdminUsers] = useState<any[]>([]);
@@ -658,6 +659,16 @@ export default function App() {
     } finally {
       setFraudCheckingFor(null);
     }
+  };
+
+  // --- Run All Fraud Checks (sequential) ---
+  const runAllFraudChecks = async () => {
+    const unchecked = results.filter(r => r.status === 'active' && r.fraudScore == null && r.ip && r.ip !== 'Checking...');
+    for (const result of unchecked) {
+      await runFraudCheck(result.id);
+    }
+    setStatus(`All fraud checks done.`);
+    setTimeout(() => setStatus("Ready."), 2000);
   };
 
   // --- Admin Functions ---
@@ -1234,13 +1245,43 @@ export default function App() {
           {/* Results Table */}
           <div className="bg-zinc-900/60 backdrop-blur-2xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl relative z-10">
             <div className="p-4 border-b border-white/10 flex items-center justify-between bg-black/20">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
                 <div className="w-8 h-8 bg-white/5 rounded-lg flex items-center justify-center border border-white/10">
                   <RefreshCw className={cn("w-4 h-4 text-zinc-400", isSearching && "animate-spin")} />
                 </div>
                 <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-zinc-300">Active Proxies & Profiles</h3>
+                {results.length > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    {results.filter(r => r.status === 'active').length > 0 && (
+                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 tracking-wider">
+                        {results.filter(r => r.status === 'active').length} active
+                      </span>
+                    )}
+                    {results.filter(r => !!r.phoneNumber).length > 0 && (
+                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 tracking-wider">
+                        {results.filter(r => !!r.phoneNumber).length} created
+                      </span>
+                    )}
+                    {results.filter(r => r.status === 'failed').length > 0 && (
+                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 border border-red-500/20 tracking-wider">
+                        {results.filter(r => r.status === 'failed').length} failed
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="flex gap-2">
+                {results.filter(r => r.status === 'active' && r.fraudScore == null).length > 0 && (
+                  <button
+                    onClick={runAllFraudChecks}
+                    disabled={!!fraudCheckingFor}
+                    className="flex items-center gap-2 px-4 py-2.5 bg-violet-500/10 hover:bg-violet-500/20 rounded-2xl text-violet-400 hover:text-violet-300 border border-violet-500/20 hover:border-violet-500/30 transition-all active:scale-95 text-xs font-bold uppercase tracking-widest disabled:opacity-40"
+                    title="Run fraud check on all unscored active proxies"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    Fraud All
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     setResults(prev => prev.filter(r => !!r.phoneNumber));
@@ -1296,9 +1337,36 @@ export default function App() {
                         </td>
                         <td className="px-6 py-3">
                           <div className="flex flex-col gap-1.5">
-                            <span className="text-sm font-bold text-white tracking-tight truncate max-w-[200px]">{res.city}</span>
-                            <span className="text-xs font-mono text-zinc-500 bg-white/5 px-2.5 py-1 rounded border border-white/5 truncate max-w-[130px] w-fit">{res.ip}</span>
-                            <div className="flex items-center gap-2">
+                            {/* City + optional note badge */}
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm font-bold text-white tracking-tight truncate max-w-[180px]">{res.city}</span>
+                              {res.note && (
+                                <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-white/5 truncate max-w-[80px]" title={res.note}>
+                                  {res.note}
+                                </span>
+                              )}
+                            </div>
+                            {/* IP + fraud check button on same row */}
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs font-mono text-zinc-500 bg-white/5 px-2.5 py-1 rounded border border-white/5 truncate max-w-[130px]">{res.ip}</span>
+                              <button
+                                onClick={() => runFraudCheck(res.id)}
+                                disabled={fraudCheckingFor === res.id || res.status === 'pending'}
+                                className={cn(
+                                  "p-1.5 rounded-lg border transition-all active:scale-95 disabled:opacity-40 shrink-0",
+                                  res.fraudScore != null
+                                    ? "bg-white/5 border-white/5 text-zinc-500 hover:text-white hover:bg-white/10"
+                                    : "bg-violet-500/10 border-violet-500/20 text-violet-400 hover:bg-violet-500/20"
+                                )}
+                                title={res.fraudScore != null ? `Re-check fraud (current: ${res.fraudScore}/100 · ${res.fraudRisk})` : "Run Fraud Check"}
+                              >
+                                {fraudCheckingFor === res.id
+                                  ? <RefreshCw className="w-3 h-3 animate-spin" />
+                                  : <ShieldCheck className="w-3 h-3" />}
+                              </button>
+                            </div>
+                            {/* Ping + fraud score pills */}
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               {res.ping && (
                                 <span className={cn(
                                   "text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider border shadow-sm",
@@ -1309,26 +1377,14 @@ export default function App() {
                                   {res.ping}ms
                                 </span>
                               )}
-                              {/* Inline fraud check button */}
-                              <button
-                                onClick={() => runFraudCheck(res.id)}
-                                disabled={fraudCheckingFor === res.id || res.status === 'pending'}
-                                className={cn(
-                                  "p-1.5 rounded-lg border transition-all active:scale-95 disabled:opacity-40",
-                                  res.fraudScore != null
-                                    ? "bg-white/5 border-white/5 text-zinc-500 hover:text-white hover:bg-white/10"
-                                    : "bg-violet-500/10 border-violet-500/20 text-violet-400 hover:bg-violet-500/20"
-                                )}
-                                title={res.fraudScore != null ? `Fraud: ${res.fraudScore}/100 (${res.fraudRisk})` : "Run Fraud Check"}
-                              >
-                                {fraudCheckingFor === res.id
-                                  ? <RefreshCw className="w-3 h-3 animate-spin" />
-                                  : <ShieldCheck className="w-3 h-3" />}
-                              </button>
                               {res.fraudScore != null && (
                                 <span className={cn(
-                                  "text-[10px] font-black uppercase tracking-wider",
-                                  res.fraudScore < 40 ? "text-emerald-400" : res.fraudScore < 70 ? "text-yellow-400" : "text-red-400"
+                                  "text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider border shadow-sm",
+                                  res.fraudScore < 40
+                                    ? "text-emerald-400 bg-emerald-400/10 border-emerald-400/20"
+                                    : res.fraudScore < 70
+                                    ? "text-yellow-400 bg-yellow-400/10 border-yellow-400/20"
+                                    : "text-red-400 bg-red-400/10 border-red-400/20"
                                 )}>
                                   {res.fraudScore}/100 · {res.fraudRisk}
                                 </span>
@@ -1341,8 +1397,23 @@ export default function App() {
                             <span className="text-xs font-bold uppercase tracking-wider text-zinc-500">Proxy Auth</span>
                             <div className="flex items-center gap-2.5">
                               <span className="text-xs font-mono text-white bg-black/40 px-2.5 py-1 rounded border border-white/5 truncate max-w-[250px]">{res.username}:{proxyConfig.pass}</span>
-                              <button onClick={() => copyToClipboard(`${res.username}:${proxyConfig.pass}`, "Proxy")} className="p-2 bg-white/5 hover:bg-white/10 rounded-lg border border-white/5 transition-all">
-                                <Copy className="w-4 h-4" />
+                              <button
+                                onClick={() => {
+                                  copyToClipboard(`${res.username}:${proxyConfig.pass}`, "Proxy");
+                                  setCopiedProxyId(res.id);
+                                  setTimeout(() => setCopiedProxyId(null), 1500);
+                                }}
+                                className={cn(
+                                  "p-2 rounded-lg border transition-all active:scale-95",
+                                  copiedProxyId === res.id
+                                    ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-400"
+                                    : "bg-white/5 hover:bg-white/10 border-white/5 text-zinc-400 hover:text-white"
+                                )}
+                                title="Copy proxy credentials"
+                              >
+                                {copiedProxyId === res.id
+                                  ? <CheckCircle2 className="w-4 h-4" />
+                                  : <Copy className="w-4 h-4" />}
                               </button>
                             </div>
                           </div>
