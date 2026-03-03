@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IP Risk Check — HingeAutomator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background-color: #050505;
+      color: #e4e4e7;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 32px 16px 64px;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      background-image:
+        radial-gradient(at 0% 0%, rgba(79, 70, 229, 0.08) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(16, 185, 129, 0.08) 0px, transparent 50%);
+      background-attachment: fixed;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+    .header-icon {
+      width: 34px;
+      height: 34px;
+      background: rgba(16, 185, 129, 0.08);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    }
+    .header h1 {
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: #e4e4e7;
+    }
+    .header h1 span { color: #10b981; }
+
+    /* ── Card ── */
+    .card {
+      width: 100%;
+      max-width: 420px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 1.25rem;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+
+    .card-header {
+      padding: 10px 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .card-header-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #10b981;
+      box-shadow: 0 0 6px rgba(16, 185, 129, 0.8);
+    }
+    .card-header-dot.loading {
+      background: #52525b;
+      box-shadow: none;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+    .card-header-title {
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: #52525b;
+    }
+
+    /* ── Info rows ── */
+    .info-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 11px 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    }
+    .info-row:last-of-type { border-bottom: none; }
+
+    .info-label {
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: #52525b;
+    }
+    .info-value {
+      font-size: 11px;
+      font-weight: 600;
+      color: #d4d4d8;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.02em;
+    }
+    .info-value.muted {
+      color: #3f3f46;
+      font-style: italic;
+    }
+
+    /* ── Risk badge ── */
+    .risk-badge {
+      margin: 0 12px 12px;
+      padding: 10px 16px;
+      border-radius: 0.75rem;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      text-align: center;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      color: #3f3f46;
+      transition: all 0.3s ease;
+    }
+    .risk-badge.green {
+      background: rgba(16, 185, 129, 0.08);
+      border-color: rgba(16, 185, 129, 0.25);
+      color: #10b981;
+    }
+    .risk-badge.yellow {
+      background: rgba(245, 158, 11, 0.08);
+      border-color: rgba(245, 158, 11, 0.25);
+      color: #f59e0b;
+    }
+    .risk-badge.red {
+      background: rgba(239, 68, 68, 0.08);
+      border-color: rgba(239, 68, 68, 0.25);
+      color: #ef4444;
+    }
+
+    /* ── Buttons ── */
+    .btn-grid {
+      width: 100%;
+      max-width: 420px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    button {
+      padding: 11px 16px;
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      border: 1px solid rgba(16, 185, 129, 0.15);
+      border-radius: 0.75rem;
+      background: rgba(16, 185, 129, 0.06);
+      color: #10b981;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      font-family: inherit;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    button:hover {
+      background: rgba(16, 185, 129, 0.12);
+      border-color: rgba(16, 185, 129, 0.35);
+    }
+    button:active {
+      transform: scale(0.97);
+    }
+
+    /* ── Copied toast ── */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #10b981;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      padding: 10px 20px;
+      border-radius: 999px;
+      opacity: 0;
+      transition: all 0.3s ease;
+      pointer-events: none;
+      font-family: inherit;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="header-icon">🔍</div>
+    <h1>IP <span>&</span> Risk Analyse</h1>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-header-dot loading" id="statusDot"></div>
+      <div class="card-header-title" id="cardTitle">Laden...</div>
+    </div>
+
+    <div class="info-row">
+      <span class="info-label">IP-Adresse</span>
+      <span class="info-value muted" id="ip">Lade...</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Latitude</span>
+      <span class="info-value muted" id="lat">—</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Longitude</span>
+      <span class="info-value muted" id="lon">—</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Trust Score</span>
+      <span class="info-value muted" id="trust">—</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Risk Level</span>
+      <span class="info-value muted" id="risk">—</span>
+    </div>
+
+    <div id="riskBox" class="risk-badge">Warte auf Daten...</div>
+  </div>
+
+  <div class="btn-grid">
+    <button id="copyIP">📋 IP kopieren</button>
+    <button id="copyLat">📋 Latitude</button>
+    <button id="copyLong">📋 Longitude</button>
+    <button id="copyScore">📋 Score</button>
+  </div>
+
+  <div class="toast" id="toast">Kopiert!</div>
+
+  <script>
+    let lat, lon, ip, trustScore, riskLevel;
+    let copyLatValue, copyLonValue;
+    const API_KEY = "0NZfP48YNIz1Z-ICI9yTYi7N7.tpsVWPSNyP6NlLPC87WN18EoGWHtbdmfGOC1kQ";
+
+    const ipSpan    = document.getElementById("ip");
+    const latSpan   = document.getElementById("lat");
+    const lonSpan   = document.getElementById("lon");
+    const trustSpan = document.getElementById("trust");
+    const riskSpan  = document.getElementById("risk");
+    const riskBox   = document.getElementById("riskBox");
+    const statusDot = document.getElementById("statusDot");
+    const cardTitle = document.getElementById("cardTitle");
+    const toast     = document.getElementById("toast");
+
+    function getOffsetCoordinate(latDeg, lonDeg, minKm = 2, maxKm = 3) {
+      const R = 6371000;
+      const lat1 = (latDeg * Math.PI) / 180;
+      const lon1 = (lonDeg * Math.PI) / 180;
+      const distance = (minKm + Math.random() * (maxKm - minKm)) * 1000;
+      const bearing = Math.random() * 2 * Math.PI;
+      const dr = distance / R;
+      const lat2 = Math.asin(
+        Math.sin(lat1) * Math.cos(dr) +
+        Math.cos(lat1) * Math.sin(dr) * Math.cos(bearing)
+      );
+      const lon2 = lon1 + Math.atan2(
+        Math.sin(bearing) * Math.sin(dr) * Math.cos(lat1),
+        Math.cos(dr) - Math.sin(lat1) * Math.sin(lat2)
+      );
+      let newLat = (lat2 * 180) / Math.PI;
+      let newLon = (lon2 * 180) / Math.PI;
+      newLon = ((newLon + 540) % 360) - 180;
+      return { lat: newLat, lon: newLon };
+    }
+
+    function setReady() {
+      statusDot.classList.remove("loading");
+      cardTitle.textContent = "Network Info";
+    }
+
+    function clearMuted(el) {
+      el.classList.remove("muted");
+    }
+
+    async function loadData() {
+      try {
+        const geo = await fetch("https://ipapi.co/json/").then(r => r.json());
+        ip  = geo.ip;
+        lat = parseFloat(geo.latitude);
+        lon = parseFloat(geo.longitude);
+
+        ipSpan.textContent  = ip;  clearMuted(ipSpan);
+        latSpan.textContent = lat; clearMuted(latSpan);
+        lonSpan.textContent = lon; clearMuted(lonSpan);
+
+        const off = getOffsetCoordinate(lat, lon, 2, 3);
+        copyLatValue = off.lat.toFixed(6);
+        copyLonValue = off.lon.toFixed(6);
+
+        const url = `https://endpoint.apivoid.com/iprep/v1/pay-as-you-go/?key=${API_KEY}&ip=${ip}`;
+        const apivoid = await fetch(url).then(r => r.json());
+        trustScore = apivoid.data.report.score;
+        riskLevel  = apivoid.data.report.risk_level;
+
+        trustSpan.textContent = trustScore; clearMuted(trustSpan);
+        riskSpan.textContent  = riskLevel;  clearMuted(riskSpan);
+
+        if (riskLevel === "low") {
+          riskBox.className   = "risk-badge green";
+          riskBox.textContent = "🟢 Niedriges Risiko";
+        } else if (riskLevel === "medium") {
+          riskBox.className   = "risk-badge yellow";
+          riskBox.textContent = "🟡 Mittleres Risiko";
+        } else {
+          riskBox.className   = "risk-badge red";
+          riskBox.textContent = "🔴 HOHES RISIKO!";
+        }
+
+        setReady();
+      } catch (err) {
+        console.error(err);
+        setReady();
+        if (riskBox) riskBox.remove();
+      }
+    }
+
+    loadData();
+
+    let toastTimer;
+    function copy(text) {
+      if (text === undefined || text === null || text === "") return;
+      navigator.clipboard.writeText(text.toString()).catch(console.error);
+      clearTimeout(toastTimer);
+      toast.classList.add("show");
+      toastTimer = setTimeout(() => toast.classList.remove("show"), 1800);
+    }
+
+    document.getElementById("copyIP").addEventListener("click",    () => copy(ip));
+    document.getElementById("copyLat").addEventListener("click",   () => copy(copyLatValue));
+    document.getElementById("copyLong").addEventListener("click",  () => copy(copyLonValue));
+    document.getElementById("copyScore").addEventListener("click", () => copy(trustScore));
+  </script>
+</body>
+</html>

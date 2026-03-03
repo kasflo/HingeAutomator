@@ -557,6 +557,11 @@ a life goal of mine: <option>`;
     }
   });
 
+  // Static pages (always served regardless of mode)
+  app.get("/iplocation", (req, res) => {
+    res.sendFile(path.join(process.cwd(), "public", "iplocation.html"));
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
