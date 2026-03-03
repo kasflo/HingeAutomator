@@ -7,6 +7,7 @@ import fs from "fs";
 import Database from "better-sqlite3";
 import bcrypt from "bcryptjs";
 import Anthropic from "@anthropic-ai/sdk";
+import { HttpsProxyAgent } from "https-proxy-agent";
 
 // DB lives outside the project folder so it survives re-clones
 const DB_DIR = path.resolve(process.cwd(), "..");
@@ -438,6 +439,40 @@ async function startServer() {
   app.delete("/api/accounts/:id", (req, res) => {
     db.prepare("DELETE FROM accounts WHERE id = ?").run(req.params.id);
     res.json({ success: true });
+  });
+
+  // Proxy connectivity test — connects through ProxyEmpire, returns real IP + ping
+  app.get("/api/proxy-test", async (req, res) => {
+    const { username, password } = req.query;
+    if (!username || !password) return res.status(400).json({ ok: false, error: "username and password required" });
+    const TIMEOUT_MS = 12000;
+    try {
+      const proxyUrl = `http://${encodeURIComponent(username as string)}:${encodeURIComponent(password as string)}@v2.proxyempire.io:5000`;
+      const agent = new HttpsProxyAgent(proxyUrl);
+      const start = Date.now();
+
+      // Promise.race ensures we always time out, even if the CONNECT phase hangs
+      const response = await Promise.race([
+        axios.get("https://api.ipify.org?format=json", {
+          httpsAgent: agent,
+          proxy: false, // let https-proxy-agent handle it
+          timeout: TIMEOUT_MS,
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(Object.assign(new Error("proxy timeout"), { code: "ETIMEDOUT" })), TIMEOUT_MS)
+        ),
+      ]);
+
+      const ping = Date.now() - start;
+      const ip = (response as any).data?.ip;
+      if (!ip) return res.json({ ok: false, error: "No IP returned" });
+      res.json({ ok: true, ip, ping });
+    } catch (err: any) {
+      const msg = err.code === "ECONNREFUSED" ? "proxy refused connection"
+        : err.code === "ETIMEDOUT" || err.code === "ECONNABORTED" || err.message?.includes("timeout") ? "proxy timeout"
+        : err.message || "unknown error";
+      res.json({ ok: false, error: msg });
+    }
   });
 
   // Fraud Check Proxy (scamalytics.com)
