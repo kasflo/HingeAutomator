@@ -62,7 +62,7 @@
       border: 1px solid rgba(255, 255, 255, 0.07);
       border-radius: 1.25rem;
       overflow: hidden;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
     }
 
     .card-header {
@@ -70,8 +70,13 @@
       border-bottom: 1px solid rgba(255, 255, 255, 0.05);
       display: flex;
       align-items: center;
-      gap: 8px;
+      justify-content: space-between;
       background: rgba(255, 255, 255, 0.02);
+    }
+    .card-header-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
     .card-header-dot {
       width: 6px;
@@ -83,11 +88,11 @@
     .card-header-dot.loading {
       background: #52525b;
       box-shadow: none;
-      animation: pulse 1.5s ease-in-out infinite;
+      animation: pulse 1.4s ease-in-out infinite;
     }
     @keyframes pulse {
       0%, 100% { opacity: 1; }
-      50% { opacity: 0.3; }
+      50% { opacity: 0.2; }
     }
     .card-header-title {
       font-size: 9px;
@@ -96,17 +101,21 @@
       text-transform: uppercase;
       color: #52525b;
     }
+    .timestamp {
+      font-size: 9px;
+      font-weight: 600;
+      color: #3f3f46;
+      letter-spacing: 0.05em;
+    }
 
     /* ── Info rows ── */
     .info-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 11px 16px;
+      padding: 12px 16px;
       border-bottom: 1px solid rgba(255, 255, 255, 0.04);
     }
-    .info-row:last-of-type { border-bottom: none; }
-
     .info-label {
       font-size: 9px;
       font-weight: 800;
@@ -119,62 +128,28 @@
       font-weight: 600;
       color: #d4d4d8;
       font-variant-numeric: tabular-nums;
-      letter-spacing: 0.02em;
     }
-    .info-value.muted {
-      color: #3f3f46;
-      font-style: italic;
-    }
-
-    /* ── Risk badge ── */
-    .risk-badge {
-      margin: 0 12px 12px;
-      padding: 10px 16px;
-      border-radius: 0.75rem;
-      font-size: 10px;
-      font-weight: 800;
-      letter-spacing: 0.15em;
-      text-transform: uppercase;
-      text-align: center;
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      color: #3f3f46;
-      transition: all 0.3s ease;
-    }
-    .risk-badge.green {
-      background: rgba(16, 185, 129, 0.08);
-      border-color: rgba(16, 185, 129, 0.25);
-      color: #10b981;
-    }
-    .risk-badge.yellow {
-      background: rgba(245, 158, 11, 0.08);
-      border-color: rgba(245, 158, 11, 0.25);
-      color: #f59e0b;
-    }
-    .risk-badge.red {
-      background: rgba(239, 68, 68, 0.08);
-      border-color: rgba(239, 68, 68, 0.25);
-      color: #ef4444;
+    .info-value.muted { color: #3f3f46; }
+    .info-value.city-country {
+      font-size: 11px;
+      color: #a1a1aa;
     }
 
-    /* ── Buttons ── */
-    .btn-grid {
+    /* ── Fraud check section ── */
+    .fraud-section {
+      padding: 12px 16px;
+    }
+
+    .btn-fraud {
       width: 100%;
-      max-width: 420px;
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-    }
-
-    button {
       padding: 11px 16px;
       font-size: 9px;
       font-weight: 800;
       letter-spacing: 0.15em;
       text-transform: uppercase;
-      border: 1px solid rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.2);
       border-radius: 0.75rem;
-      background: rgba(16, 185, 129, 0.06);
+      background: rgba(16, 185, 129, 0.08);
       color: #10b981;
       cursor: pointer;
       transition: all 0.15s ease;
@@ -182,23 +157,152 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 6px;
+      gap: 8px;
     }
-    button:hover {
-      background: rgba(16, 185, 129, 0.12);
+    .btn-fraud:hover:not(:disabled) {
+      background: rgba(16, 185, 129, 0.14);
       border-color: rgba(16, 185, 129, 0.35);
     }
-    button:active {
-      transform: scale(0.97);
+    .btn-fraud:active:not(:disabled) { transform: scale(0.98); }
+    .btn-fraud:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .btn-fraud.checking {
+      color: #52525b;
+      border-color: rgba(255,255,255,0.06);
+      background: rgba(255,255,255,0.02);
     }
 
-    /* ── Copied toast ── */
+    /* Spinner */
+    .spinner {
+      width: 12px;
+      height: 12px;
+      border: 2px solid rgba(16, 185, 129, 0.3);
+      border-top-color: #10b981;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Fraud result badge */
+    .fraud-result {
+      margin-top: 8px;
+      padding: 10px 16px;
+      border-radius: 0.75rem;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      text-align: center;
+      display: none;
+      transition: all 0.3s ease;
+    }
+    .fraud-result.show { display: block; }
+    .fraud-result.green {
+      background: rgba(16, 185, 129, 0.08);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+      color: #10b981;
+    }
+    .fraud-result.yellow {
+      background: rgba(245, 158, 11, 0.08);
+      border: 1px solid rgba(245, 158, 11, 0.25);
+      color: #f59e0b;
+    }
+    .fraud-result.red {
+      background: rgba(239, 68, 68, 0.08);
+      border: 1px solid rgba(239, 68, 68, 0.25);
+      color: #ef4444;
+    }
+
+    /* ── Lat/Lon cards below ── */
+    .coord-cards {
+      width: 100%;
+      max-width: 420px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .coord-card {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 1rem;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .coord-left { display: flex; flex-direction: column; gap: 2px; }
+    .coord-label {
+      font-size: 8px;
+      font-weight: 800;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: #52525b;
+    }
+    .coord-value {
+      font-size: 13px;
+      font-weight: 700;
+      color: #d4d4d8;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.02em;
+    }
+    .coord-value.muted { color: #3f3f46; font-size: 11px; }
+
+    .btn-copy-coord {
+      padding: 7px 14px;
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      border: 1px solid rgba(16, 185, 129, 0.15);
+      border-radius: 0.5rem;
+      background: rgba(16, 185, 129, 0.06);
+      color: #10b981;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      font-family: inherit;
+    }
+    .btn-copy-coord:hover { background: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.3); }
+    .btn-copy-coord:active { transform: scale(0.96); }
+    .btn-copy-coord.copied {
+      background: rgba(16, 185, 129, 0.15);
+      border-color: rgba(16, 185, 129, 0.4);
+      color: #34d399;
+    }
+
+    /* ── Refresh button ── */
+    .btn-refresh {
+      width: 100%;
+      max-width: 420px;
+      padding: 11px 16px;
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 0.75rem;
+      background: rgba(255, 255, 255, 0.02);
+      color: #52525b;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      font-family: inherit;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .btn-refresh:hover { background: rgba(255,255,255,0.04); color: #71717a; border-color: rgba(255,255,255,0.1); }
+    .btn-refresh:active { transform: scale(0.98); }
+
+    /* ── Toast ── */
     .toast {
       position: fixed;
       bottom: 24px;
       left: 50%;
       transform: translateX(-50%) translateY(80px);
-      background: rgba(16, 185, 129, 0.15);
+      background: rgba(16, 185, 129, 0.12);
       border: 1px solid rgba(16, 185, 129, 0.3);
       color: #10b981;
       font-size: 10px;
@@ -208,9 +312,10 @@
       padding: 10px 20px;
       border-radius: 999px;
       opacity: 0;
-      transition: all 0.3s ease;
+      transition: all 0.25s ease;
       pointer-events: none;
       font-family: inherit;
+      white-space: nowrap;
     }
     .toast.show {
       opacity: 1;
@@ -225,60 +330,83 @@
     <h1>IP <span>&</span> Risk Analyse</h1>
   </div>
 
+  <!-- Main info card -->
   <div class="card">
     <div class="card-header">
-      <div class="card-header-dot loading" id="statusDot"></div>
-      <div class="card-header-title" id="cardTitle">Laden...</div>
+      <div class="card-header-left">
+        <div class="card-header-dot loading" id="statusDot"></div>
+        <div class="card-header-title" id="cardTitle">Laden...</div>
+      </div>
+      <div class="timestamp" id="timestamp"></div>
     </div>
 
     <div class="info-row">
       <span class="info-label">IP-Adresse</span>
-      <span class="info-value muted" id="ip">Lade...</span>
+      <span class="info-value muted" id="ip">—</span>
     </div>
-    <div class="info-row">
-      <span class="info-label">Latitude</span>
-      <span class="info-value muted" id="lat">—</span>
-    </div>
-    <div class="info-row">
-      <span class="info-label">Longitude</span>
-      <span class="info-value muted" id="lon">—</span>
-    </div>
-    <div class="info-row">
-      <span class="info-label">Trust Score</span>
-      <span class="info-value muted" id="trust">—</span>
-    </div>
-    <div class="info-row">
-      <span class="info-label">Risk Level</span>
-      <span class="info-value muted" id="risk">—</span>
+    <div class="info-row" style="border-bottom:none;">
+      <span class="info-label">Standort</span>
+      <span class="info-value city-country muted" id="cityCountry">—</span>
     </div>
 
-    <div id="riskBox" class="risk-badge">Warte auf Daten...</div>
+    <!-- Fraud check button + result -->
+    <div class="fraud-section">
+      <button class="btn-fraud" id="fraudBtn" disabled>
+        <span id="fraudBtnIcon">🛡️</span>
+        <span id="fraudBtnText">Fraud Score prüfen</span>
+      </button>
+      <div class="fraud-result" id="fraudResult"></div>
+    </div>
   </div>
 
-  <div class="btn-grid">
-    <button id="copyIP">📋 IP kopieren</button>
-    <button id="copyLat">📋 Latitude</button>
-    <button id="copyLong">📋 Longitude</button>
-    <button id="copyScore">📋 Score</button>
+  <!-- Latitude & Longitude below -->
+  <div class="coord-cards">
+    <div class="coord-card">
+      <div class="coord-left">
+        <div class="coord-label">Latitude</div>
+        <div class="coord-value muted" id="lat">—</div>
+      </div>
+      <button class="btn-copy-coord" id="copyLat" disabled>Kopieren</button>
+    </div>
+    <div class="coord-card">
+      <div class="coord-left">
+        <div class="coord-label">Longitude</div>
+        <div class="coord-value muted" id="lon">—</div>
+      </div>
+      <button class="btn-copy-coord" id="copyLong" disabled>Kopieren</button>
+    </div>
   </div>
 
-  <div class="toast" id="toast">Kopiert!</div>
+  <!-- Refresh -->
+  <button class="btn-refresh" id="refreshBtn">
+    <span id="refreshIcon">↺</span>
+    Neu laden
+  </button>
+
+  <div class="toast" id="toast"></div>
 
   <script>
     let lat, lon, ip, trustScore, riskLevel;
     let copyLatValue, copyLonValue;
     const API_KEY = "0NZfP48YNIz1Z-ICI9yTYi7N7.tpsVWPSNyP6NlLPC87WN18EoGWHtbdmfGOC1kQ";
 
-    const ipSpan    = document.getElementById("ip");
-    const latSpan   = document.getElementById("lat");
-    const lonSpan   = document.getElementById("lon");
-    const trustSpan = document.getElementById("trust");
-    const riskSpan  = document.getElementById("risk");
-    const riskBox   = document.getElementById("riskBox");
-    const statusDot = document.getElementById("statusDot");
-    const cardTitle = document.getElementById("cardTitle");
-    const toast     = document.getElementById("toast");
+    const ipEl         = document.getElementById("ip");
+    const cityEl       = document.getElementById("cityCountry");
+    const latEl        = document.getElementById("lat");
+    const lonEl        = document.getElementById("lon");
+    const statusDot    = document.getElementById("statusDot");
+    const cardTitle    = document.getElementById("cardTitle");
+    const timestampEl  = document.getElementById("timestamp");
+    const fraudBtn     = document.getElementById("fraudBtn");
+    const fraudBtnText = document.getElementById("fraudBtnText");
+    const fraudBtnIcon = document.getElementById("fraudBtnIcon");
+    const fraudResult  = document.getElementById("fraudResult");
+    const copyLatBtn   = document.getElementById("copyLat");
+    const copyLongBtn  = document.getElementById("copyLong");
+    const refreshBtn   = document.getElementById("refreshBtn");
+    const toast        = document.getElementById("toast");
 
+    // ── Offset coordinates (2–3 km) ──
     function getOffsetCoordinate(latDeg, lonDeg, minKm = 2, maxKm = 3) {
       const R = 6371000;
       const lat1 = (latDeg * Math.PI) / 180;
@@ -303,69 +431,134 @@
     function setReady() {
       statusDot.classList.remove("loading");
       cardTitle.textContent = "Network Info";
+      const now = new Date();
+      timestampEl.textContent = now.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
     }
 
-    function clearMuted(el) {
-      el.classList.remove("muted");
-    }
+    function unmute(el) { el.classList.remove("muted"); }
 
+    // ── Load IP & geo data ──
     async function loadData() {
+      statusDot.classList.add("loading");
+      cardTitle.textContent = "Laden...";
+      fraudBtn.disabled = true;
+      fraudResult.classList.remove("show");
+
       try {
         const geo = await fetch("https://ipapi.co/json/").then(r => r.json());
         ip  = geo.ip;
         lat = parseFloat(geo.latitude);
         lon = parseFloat(geo.longitude);
+        const city    = geo.city || "";
+        const country = geo.country_name || "";
 
-        ipSpan.textContent  = ip;  clearMuted(ipSpan);
-        latSpan.textContent = lat; clearMuted(latSpan);
-        lonSpan.textContent = lon; clearMuted(lonSpan);
+        ipEl.textContent = ip; unmute(ipEl);
+        cityEl.textContent = [city, country].filter(Boolean).join(", ") || "—"; unmute(cityEl);
 
         const off = getOffsetCoordinate(lat, lon, 2, 3);
         copyLatValue = off.lat.toFixed(6);
         copyLonValue = off.lon.toFixed(6);
 
+        latEl.textContent = lat.toFixed(6); unmute(latEl); latEl.classList.remove("muted");
+        lonEl.textContent = lon.toFixed(6); unmute(lonEl); lonEl.classList.remove("muted");
+        copyLatBtn.disabled  = false;
+        copyLongBtn.disabled = false;
+        fraudBtn.disabled    = false;
+
+        setReady();
+      } catch (err) {
+        console.error(err);
+        cardTitle.textContent = "Fehler beim Laden";
+        statusDot.classList.add("loading");
+      }
+    }
+
+    // ── Fraud check (on demand) ──
+    async function checkFraud() {
+      if (!ip) return;
+      fraudBtn.disabled = true;
+      fraudBtnIcon.textContent = "";
+      const spinner = document.createElement("span");
+      spinner.className = "spinner";
+      fraudBtnIcon.appendChild(spinner);
+      fraudBtnText.textContent = "Prüfe...";
+      fraudBtn.classList.add("checking");
+      fraudResult.classList.remove("show");
+
+      try {
         const url = `https://endpoint.apivoid.com/iprep/v1/pay-as-you-go/?key=${API_KEY}&ip=${ip}`;
         const apivoid = await fetch(url).then(r => r.json());
         trustScore = apivoid.data.report.score;
         riskLevel  = apivoid.data.report.risk_level;
 
-        trustSpan.textContent = trustScore; clearMuted(trustSpan);
-        riskSpan.textContent  = riskLevel;  clearMuted(riskSpan);
-
+        fraudResult.classList.add("show");
         if (riskLevel === "low") {
-          riskBox.className   = "risk-badge green";
-          riskBox.textContent = "🟢 Niedriges Risiko";
+          fraudResult.className = "fraud-result show green";
+          fraudResult.textContent = `🟢 Niedriges Risiko · Score ${trustScore}`;
         } else if (riskLevel === "medium") {
-          riskBox.className   = "risk-badge yellow";
-          riskBox.textContent = "🟡 Mittleres Risiko";
+          fraudResult.className = "fraud-result show yellow";
+          fraudResult.textContent = `🟡 Mittleres Risiko · Score ${trustScore}`;
         } else {
-          riskBox.className   = "risk-badge red";
-          riskBox.textContent = "🔴 HOHES RISIKO!";
+          fraudResult.className = "fraud-result show red";
+          fraudResult.textContent = `🔴 Hohes Risiko · Score ${trustScore}`;
         }
-
-        setReady();
       } catch (err) {
         console.error(err);
-        setReady();
-        if (riskBox) riskBox.remove();
+        fraudResult.className = "fraud-result show";
+        fraudResult.style.color = "#71717a";
+        fraudResult.textContent = "Fehler bei der Abfrage";
+        fraudResult.classList.add("show");
+      } finally {
+        fraudBtnIcon.textContent = "🛡️";
+        fraudBtnText.textContent = "Erneut prüfen";
+        fraudBtn.classList.remove("checking");
+        fraudBtn.disabled = false;
       }
     }
 
-    loadData();
-
+    // ── Copy helper ──
     let toastTimer;
-    function copy(text) {
-      if (text === undefined || text === null || text === "") return;
+    function copy(text, label) {
+      if (!text) return;
       navigator.clipboard.writeText(text.toString()).catch(console.error);
       clearTimeout(toastTimer);
+      toast.textContent = `${label} kopiert!`;
       toast.classList.add("show");
       toastTimer = setTimeout(() => toast.classList.remove("show"), 1800);
     }
 
-    document.getElementById("copyIP").addEventListener("click",    () => copy(ip));
-    document.getElementById("copyLat").addEventListener("click",   () => copy(copyLatValue));
-    document.getElementById("copyLong").addEventListener("click",  () => copy(copyLonValue));
-    document.getElementById("copyScore").addEventListener("click", () => copy(trustScore));
+    function flashCopied(btn) {
+      btn.classList.add("copied");
+      btn.textContent = "✓";
+      setTimeout(() => { btn.classList.remove("copied"); btn.textContent = "Kopieren"; }, 1500);
+    }
+
+    // ── Events ──
+    fraudBtn.addEventListener("click", checkFraud);
+
+    copyLatBtn.addEventListener("click", () => {
+      copy(copyLatValue, "Latitude");
+      flashCopied(copyLatBtn);
+    });
+    copyLongBtn.addEventListener("click", () => {
+      copy(copyLonValue, "Longitude");
+      flashCopied(copyLongBtn);
+    });
+
+    let isRefreshing = false;
+    refreshBtn.addEventListener("click", () => {
+      if (isRefreshing) return;
+      isRefreshing = true;
+      document.getElementById("refreshIcon").textContent = "↺";
+      refreshBtn.style.opacity = "0.4";
+      loadData().finally(() => {
+        isRefreshing = false;
+        refreshBtn.style.opacity = "";
+      });
+    });
+
+    // ── Init ──
+    loadData();
   </script>
 </body>
 </html>

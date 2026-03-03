@@ -3,11 +3,22 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import axios from "axios";
 import path from "path";
+import fs from "fs";
 import Database from "better-sqlite3";
 import bcrypt from "bcryptjs";
 import Anthropic from "@anthropic-ai/sdk";
 
-const db = new Database("database.sqlite");
+// DB lives outside the project folder so it survives re-clones
+const DB_DIR = path.resolve(process.cwd(), "..");
+const DB_PATH = path.join(DB_DIR, "hingeautomator.sqlite");
+// Migrate old DB if it exists in project dir
+const OLD_DB = path.join(process.cwd(), "database.sqlite");
+if (fs.existsSync(OLD_DB) && !fs.existsSync(DB_PATH)) {
+  fs.copyFileSync(OLD_DB, DB_PATH);
+  console.log("Migrated database to", DB_PATH);
+}
+const db = new Database(DB_PATH);
+console.log("Database:", DB_PATH);
 
 // Initialize database
 db.exec(`
