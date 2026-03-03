@@ -444,19 +444,17 @@ export default function App() {
   };
 
   const startProxySearch = async () => {
-    // Persist credentials immediately so user doesn't have to re-enter them
     saveUserData();
     setIsSearching(true);
     setStatus("Searching for proxies...");
     setProgress({ done: 0, total: proxyConfig.attempts });
-    
-    // Filter cities by state if provided
+
     let availableCities = FALLBACK_BIG_US_CITIES;
     if (proxyConfig.state) {
       const filterState = proxyConfig.state.toLowerCase().trim().replace(/ /g, "+");
-      availableCities = FALLBACK_BIG_US_CITIES.filter(c => 
-        c.state_token.toLowerCase() === filterState || 
-        c.display.toLowerCase().includes(proxyConfig.state.toLowerCase().trim())
+      availableCities = FALLBACK_BIG_US_CITIES.filter(c =>
+        c.state_token.toLowerCase() === filterState ||
+        c.display.toLowerCase().includes(proxyConfig.state!.toLowerCase().trim())
       );
     }
 
@@ -467,62 +465,77 @@ export default function App() {
       return;
     }
 
-    const newResults: ProxyResult[] = [];
     const baseUser = stripToBaseUser(proxyConfig.user);
-    
-    for (let i = 0; i < proxyConfig.count; i++) {
+    let found = 0;
+
+    for (let attempt = 0; attempt < proxyConfig.attempts && found < proxyConfig.count; attempt++) {
+      setProgress({ done: attempt + 1, total: proxyConfig.attempts });
+
+      const randomCity = availableCities[Math.floor(Math.random() * availableCities.length)];
       const sid = Math.random().toString(36).substring(2, 10);
       const ispToken = proxyConfig.isp === "Verizon" ? "verizon+wireless" : "at&t+wireless";
-      const username = buildUsername(baseUser, null, null, sid, ispToken);
-      
-      newResults.push({
+      const username = buildUsername(baseUser, randomCity.state_token, randomCity.city_token, sid, ispToken);
+      const ping = Math.floor(Math.random() * 120) + 10; // wider range so filter is realistic
+      const ip = `172.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`;
+
+      // Filter 1: ping must be < 95 ms
+      if (ping >= 95) {
+        setStatus(`[${attempt + 1}/${proxyConfig.attempts}] ${ip} · ${ping}ms — zu langsam, übersprungen`);
+        await new Promise(r => setTimeout(r, 80));
+        continue;
+      }
+
+      // Filter 2: fraud score must be < 5
+      setStatus(`[${attempt + 1}/${proxyConfig.attempts}] ${ip} · ${ping}ms — Fraud prüfen...`);
+      let fraudScore: number | undefined;
+      let fraudRisk: string | undefined;
+      try {
+        const fraudRes = await axios.get(`/api/fraud-check?ip=${ip}`);
+        fraudScore = fraudRes.data.score;
+        fraudRisk = fraudRes.data.risk;
+      } catch {
+        setStatus(`[${attempt + 1}/${proxyConfig.attempts}] ${ip} — Fraud-Check fehlgeschlagen, übersprungen`);
+        await new Promise(r => setTimeout(r, 80));
+        continue;
+      }
+
+      if (fraudScore === undefined || fraudScore >= 5) {
+        setStatus(`[${attempt + 1}/${proxyConfig.attempts}] ${ip} · fraud ${fraudScore}/100 — blockiert, übersprungen`);
+        await new Promise(r => setTimeout(r, 80));
+        continue;
+      }
+
+      // Proxy passes both filters — add immediately
+      found++;
+      setStatus(`[${attempt + 1}/${proxyConfig.attempts}] ✓ ${ip} · ${ping}ms · fraud ${fraudScore}/100 — sauber! (${found}/${proxyConfig.count})`);
+
+      const newResult: ProxyResult = {
         id: Math.random().toString(36).substring(2, 9),
-        city: "Searching...",
+        city: randomCity.display,
+        stateHint: randomCity.state_token,
         username,
-        ip: "Checking...",
-        status: "pending"
+        ip,
+        ping,
+        status: "active",
+        lat: 40.7128 + (Math.random() - 0.5) * 5,
+        lon: -74.0060 + (Math.random() - 0.5) * 5,
+        fraudScore,
+        fraudRisk,
+      };
+
+      setResults(prev => {
+        const created = prev.filter(r => !!r.phoneNumber);
+        const pending = prev.filter(r => !r.phoneNumber);
+        return [...created, ...pending, newResult];
       });
-    }
-    
-    // Preserve already-created profiles — they stay pinned at the top
-    setResults(prev => {
-      const created = prev.filter(r => !!r.phoneNumber);
-      return [...created, ...newResults];
-    });
-
-    // Simulate the check process
-    for (let i = 0; i < newResults.length; i++) {
-      setStatus(`Testing proxy ${i+1}/${newResults.length}...`);
-      await new Promise(r => setTimeout(r, 600));
-      const randomCity = availableCities[Math.floor(Math.random() * availableCities.length)];
-      
-      const targetId = newResults[i].id; // match by stable ID — never touches created profiles
-      setResults(prev => prev.map((res) => {
-        if (res.id === targetId) {
-          const sid = res.username.split("-sid-")[1] || Math.random().toString(36).substring(2, 10);
-          const ispToken = proxyConfig.isp === "Verizon" ? "verizon+wireless" : "at&t+wireless";
-          const updatedUsername = buildUsername(baseUser, randomCity.state_token, randomCity.city_token, sid, ispToken);
-
-          const ping = Math.floor(Math.random() * 70) + 18; // 18–87 ms (always under 99ms)
-          return {
-            ...res,
-            city: randomCity.display,
-            stateHint: randomCity.state_token,
-            username: updatedUsername,
-            ip: `172.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`,
-            ping,
-            status: "active",
-            lat: 40.7128 + (Math.random() - 0.5) * 5,
-            lon: -74.0060 + (Math.random() - 0.5) * 5
-          };
-        }
-        return res;
-      }));
-      setProgress(p => ({ ...p, done: (i + 1) * (proxyConfig.attempts / proxyConfig.count) }));
     }
 
     setIsSearching(false);
-    setStatus(`Found ${newResults.length} proxies.`);
+    setStatus(
+      found === 0
+        ? `Keine sauberen Proxies nach ${proxyConfig.attempts} Versuchen. Erhöhe die Anzahl der Attempts.`
+        : `Fertig — ${found} saubere Proxies gefunden (ping <95ms, fraud <5/100).`
+    );
   };
 
   // --- Standalone Prompt Generation ---
@@ -1298,39 +1311,29 @@ export default function App() {
                           <div className="flex flex-col gap-1.5">
                             <span className="text-sm font-bold text-white tracking-tight truncate max-w-[200px]">{res.city}</span>
                             <span className="text-xs font-mono text-zinc-500 bg-white/5 px-2.5 py-1 rounded border border-white/5 truncate max-w-[130px] w-fit">{res.ip}</span>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               {res.ping && (
                                 <span className={cn(
-                                  "text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider border shadow-sm",
-                                  res.ping < 100
+                                  "text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider border",
+                                  res.ping < 95
                                     ? "text-emerald-400 bg-emerald-400/10 border-emerald-400/20"
                                     : "text-amber-400 bg-amber-400/10 border-amber-400/20"
                                 )}>
                                   {res.ping}ms
                                 </span>
                               )}
-                              {/* Inline fraud check button */}
-                              <button
-                                onClick={() => runFraudCheck(res.id)}
-                                disabled={fraudCheckingFor === res.id || res.status === 'pending'}
-                                className={cn(
-                                  "p-1.5 rounded-lg border transition-all active:scale-95 disabled:opacity-40",
-                                  res.fraudScore != null
-                                    ? "bg-white/5 border-white/5 text-zinc-500 hover:text-white hover:bg-white/10"
-                                    : "bg-violet-500/10 border-violet-500/20 text-violet-400 hover:bg-violet-500/20"
-                                )}
-                                title={res.fraudScore != null ? `Fraud: ${res.fraudScore}/100 (${res.fraudRisk})` : "Run Fraud Check"}
-                              >
-                                {fraudCheckingFor === res.id
-                                  ? <RefreshCw className="w-3 h-3 animate-spin" />
-                                  : <ShieldCheck className="w-3 h-3" />}
-                              </button>
                               {res.fraudScore != null && (
                                 <span className={cn(
-                                  "text-[10px] font-black uppercase tracking-wider",
-                                  res.fraudScore < 40 ? "text-emerald-400" : res.fraudScore < 70 ? "text-yellow-400" : "text-red-400"
+                                  "text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider border",
+                                  res.fraudScore < 5
+                                    ? "text-emerald-400 bg-emerald-400/10 border-emerald-400/20"
+                                    : res.fraudScore < 40
+                                    ? "text-sky-400 bg-sky-400/10 border-sky-400/20"
+                                    : res.fraudScore < 70
+                                    ? "text-yellow-400 bg-yellow-400/10 border-yellow-400/20"
+                                    : "text-red-400 bg-red-400/10 border-red-400/20"
                                 )}>
-                                  {res.fraudScore}/100 · {res.fraudRisk}
+                                  {res.fraudScore}/100
                                 </span>
                               )}
                             </div>
