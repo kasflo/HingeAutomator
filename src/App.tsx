@@ -489,7 +489,7 @@ export default function App() {
           { timeout: 14000 }
         );
         if (!testRes.data.ok) {
-          setStatus(`${prefix} Fehlgeschlagen`);
+          setStatus(`${prefix} Fehlgeschlagen — ${testRes.data.error ?? ''}`);
           continue;
         }
         ip = testRes.data.ip;
@@ -499,13 +499,7 @@ export default function App() {
         continue;
       }
 
-      // Step 2: ping must be < 95 ms
-      if (ping >= 95) {
-        setStatus(`${prefix} Ping ${ping}ms — zu langsam`);
-        continue;
-      }
-
-      // Step 3: fraud score must be < 5
+      // Step 2: Fraud score (informational only — no filter)
       setStatus(`${prefix} Fraud prüfen... (${ping}ms)`);
       let fraudScore: number | undefined;
       let fraudRisk: string | undefined;
@@ -514,18 +508,12 @@ export default function App() {
         fraudScore = fraudRes.data.score;
         fraudRisk = fraudRes.data.risk;
       } catch {
-        setStatus(`${prefix} Fraud-Check fehlgeschlagen`);
-        continue;
+        // Fraud check failed — still add proxy, just without score
       }
 
-      if (fraudScore === undefined || fraudScore >= 5) {
-        setStatus(`${prefix} Score ${fraudScore ?? '?'}/100 — blockiert`);
-        continue;
-      }
-
-      // All filters passed — add immediately
+      // Proxy connected — add immediately with real IP, ping and fraud score
       found++;
-      setStatus(`${prefix} ✓ Sauber — ${found}/${targetCount} gefunden`);
+      setStatus(`${prefix} ✓ ${ip} — ${ping}ms — ${found}/${targetCount}`);
 
       const newResult: ProxyResult = {
         id: Math.random().toString(36).substring(2, 9),
@@ -551,7 +539,7 @@ export default function App() {
     setIsSearching(false);
     setStatus(
       found === 0
-        ? `Keine sauberen Proxies nach ${proxyConfig.attempts} Versuchen.`
+        ? `Keine Verbindung nach ${proxyConfig.attempts} Versuchen. Zugangsdaten prüfen.`
         : `Fertig — ${found}/${targetCount} Proxies gefunden.`
     );
   };
