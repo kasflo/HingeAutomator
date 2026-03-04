@@ -442,15 +442,17 @@ async function startServer() {
   });
 
   // Proxy connectivity test — routes through ProxyEmpire gateway, returns real IP + ping
+  // Tries port 5000 first, falls back to port 80 (in case outbound 5000 is firewalled)
   app.get("/api/proxy-test", async (req, res) => {
     const { username, password } = req.query;
     if (!username || !password) return res.status(400).json({ ok: false, error: "username and password required" });
-    const TIMEOUT_MS = 12000;
-    try {
-      const proxyUrl = `http://${encodeURIComponent(username as string)}:${encodeURIComponent(password as string)}@v2.proxyempire.io:5000`;
+    const TIMEOUT_MS = 10000;
+    const PORTS = [5000, 80];
+
+    const tryPort = async (port: number) => {
+      const proxyUrl = `http://${encodeURIComponent(username as string)}:${encodeURIComponent(password as string)}@v2.proxyempire.io:${port}`;
       const agent = new HttpsProxyAgent(proxyUrl);
       const start = Date.now();
-      // Promise.race guarantees timeout even if CONNECT phase hangs (axios timeout alone does not cover this)
       const response = await Promise.race([
         axios.get("https://api.ipify.org?format=json", {
           httpsAgent: agent,
@@ -463,14 +465,26 @@ async function startServer() {
       ]);
       const ping = Date.now() - start;
       const ip = (response as any).data?.ip;
-      if (!ip) return res.json({ ok: false, error: "No IP returned" });
-      res.json({ ok: true, ip, ping });
-    } catch (err: any) {
-      const msg = err.code === "ECONNREFUSED" ? "proxy refused connection"
-        : err.code === "ETIMEDOUT" || err.code === "ECONNABORTED" || err.message?.includes("timeout") ? "proxy timeout"
-        : err.message || "unknown error";
-      res.json({ ok: false, error: msg });
+      if (!ip) throw new Error("No IP returned");
+      return { ip, ping, port };
+    };
+
+    let lastErr: any;
+    for (const port of PORTS) {
+      try {
+        const result = await tryPort(port);
+        return res.json({ ok: true, ...result });
+      } catch (err: any) {
+        lastErr = err;
+        // If it's a credential/auth error (407) don't bother trying other ports
+        if (err.response?.status === 407) break;
+      }
     }
+
+    const msg = lastErr?.code === "ECONNREFUSED" ? "proxy refused connection"
+      : lastErr?.code === "ETIMEDOUT" || lastErr?.code === "ECONNABORTED" || lastErr?.message?.includes("timeout") ? "proxy timeout"
+      : lastErr?.message || "unknown error";
+    res.json({ ok: false, error: msg });
   });
 
   // Fraud Check Proxy (scamalytics.com)
