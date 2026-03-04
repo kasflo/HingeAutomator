@@ -63,7 +63,7 @@ export default function App() {
     user: "",
     pass: "",
     isp: "Verizon",
-    count: 15,
+    count: 5,
     attempts: 100,
     timeout: 10,
     workers: 30
@@ -466,29 +466,47 @@ export default function App() {
     }
 
     const baseUser = stripToBaseUser(proxyConfig.user);
+    const targetCount = Math.min(proxyConfig.count, 10); // hard cap at 10
     let found = 0;
 
-    for (let attempt = 0; attempt < proxyConfig.attempts && found < proxyConfig.count; attempt++) {
+    for (let attempt = 0; attempt < proxyConfig.attempts && found < targetCount; attempt++) {
       setProgress({ done: attempt + 1, total: proxyConfig.attempts });
 
       const randomCity = availableCities[Math.floor(Math.random() * availableCities.length)];
       const sid = Math.random().toString(36).substring(2, 10);
       const ispToken = proxyConfig.isp === "Verizon" ? "verizon+wireless" : "at&t+wireless";
       const username = buildUsername(baseUser, randomCity.state_token, randomCity.city_token, sid, ispToken);
-      const ping = Math.floor(Math.random() * 120) + 10; // wider range so filter is realistic
-      const ip = `172.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}.${Math.floor(Math.random() * 255)}`;
 
       const prefix = `[${attempt + 1}/${proxyConfig.attempts}]`;
 
-      // Filter 1: ping must be < 95 ms
-      if (ping >= 95) {
-        setStatus(`${prefix} Ping ${ping}ms — zu langsam`);
-        await new Promise(r => setTimeout(r, 80));
+      // Step 1: Real connectivity test through ProxyEmpire gateway
+      setStatus(`${prefix} Verbinde...`);
+      let ip: string;
+      let ping: number;
+      try {
+        const testRes = await axios.get(
+          `/api/proxy-test?username=${encodeURIComponent(username)}&password=${encodeURIComponent(proxyConfig.pass)}`,
+          { timeout: 14000 }
+        );
+        if (!testRes.data.ok) {
+          setStatus(`${prefix} Fehlgeschlagen`);
+          continue;
+        }
+        ip = testRes.data.ip;
+        ping = testRes.data.ping;
+      } catch {
+        setStatus(`${prefix} Timeout`);
         continue;
       }
 
-      // Filter 2: fraud score must be < 5
-      setStatus(`${prefix} Fraud prüfen...`);
+      // Step 2: ping must be < 95 ms
+      if (ping >= 95) {
+        setStatus(`${prefix} Ping ${ping}ms — zu langsam`);
+        continue;
+      }
+
+      // Step 3: fraud score must be < 5
+      setStatus(`${prefix} Fraud prüfen... (${ping}ms)`);
       let fraudScore: number | undefined;
       let fraudRisk: string | undefined;
       try {
@@ -497,19 +515,17 @@ export default function App() {
         fraudRisk = fraudRes.data.risk;
       } catch {
         setStatus(`${prefix} Fraud-Check fehlgeschlagen`);
-        await new Promise(r => setTimeout(r, 80));
         continue;
       }
 
       if (fraudScore === undefined || fraudScore >= 5) {
         setStatus(`${prefix} Score ${fraudScore ?? '?'}/100 — blockiert`);
-        await new Promise(r => setTimeout(r, 80));
         continue;
       }
 
-      // Proxy passes both filters — add immediately
+      // All filters passed — add immediately
       found++;
-      setStatus(`${prefix} ✓ Sauber — ${found}/${proxyConfig.count} gefunden`);
+      setStatus(`${prefix} ✓ Sauber — ${found}/${targetCount} gefunden`);
 
       const newResult: ProxyResult = {
         id: Math.random().toString(36).substring(2, 9),
@@ -535,8 +551,8 @@ export default function App() {
     setIsSearching(false);
     setStatus(
       found === 0
-        ? `Keine sauberen Proxies nach ${proxyConfig.attempts} Versuchen. Erhöhe die Anzahl der Attempts.`
-        : `Fertig — ${found} saubere Proxies gefunden (ping <95ms, fraud <5/100).`
+        ? `Keine sauberen Proxies nach ${proxyConfig.attempts} Versuchen.`
+        : `Fertig — ${found}/${targetCount} Proxies gefunden.`
     );
   };
 
@@ -1059,8 +1075,10 @@ export default function App() {
                         <label className="text-xs font-bold uppercase tracking-widest text-zinc-500 ml-1">Count</label>
                         <input
                           type="number"
+                          min={1}
+                          max={10}
                           value={proxyConfig.count}
-                          onChange={e => setProxyConfig({ ...proxyConfig, count: parseInt(e.target.value) })}
+                          onChange={e => setProxyConfig({ ...proxyConfig, count: Math.min(10, Math.max(1, parseInt(e.target.value) || 1)) })}
                           className="w-full bg-black/40 border border-white/10 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-emerald-500/50 transition-all"
                         />
                       </div>
