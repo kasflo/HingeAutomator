@@ -661,9 +661,11 @@ export default function App() {
   };
 
   // --- Standalone Prompt Generation ---
-  const generatePromptsForResult = async (resultId: string) => {
+  const generatePromptsForResult = async (resultId: string, activePrompts?: string[]) => {
     const result = results.find(r => r.id === resultId);
     if (!result) return;
+    // Always use the explicitly passed prompts first, then fall back to the ref
+    const promptsToUse = (activePrompts && activePrompts.length === 3) ? activePrompts : selectedPromptsRef.current;
     setGeneratingPromptsFor(resultId);
     try {
       setStatus("Generating profile data...");
@@ -671,7 +673,8 @@ export default function App() {
       const nearbyPlace = nearby[Math.floor(Math.random() * nearby.length)] || result.city;
       const jobTitle = result.jobTitle || JOB_TITLES[Math.floor(Math.random() * JOB_TITLES.length)];
       setStatus("Generating Hinge prompts...");
-      const prompts = await generateHingePrompts({ city: result.city, nearbyPlace, job: jobTitle, selectedPrompts: selectedPromptsRef.current });
+      console.log("[GeneratePrompts] Using prompts:", promptsToUse);
+      const prompts = await generateHingePrompts({ city: result.city, nearbyPlace, job: jobTitle, selectedPrompts: promptsToUse });
       setResults(prev => prev.map(r => r.id === resultId ? {
         ...r,
         nearbyPlace: r.nearbyPlace || nearbyPlace,
@@ -741,7 +744,7 @@ export default function App() {
     pollForSms(resultId, orderId);
 
     // Step 3: Generate Profile Data – failure here does NOT affect status
-    await generatePromptsForResult(resultId);
+    await generatePromptsForResult(resultId, [...selectedPromptsRef.current]);
   };
 
   const pollForSms = async (resultId: string, orderId: string) => {
@@ -1786,7 +1789,7 @@ export default function App() {
                                             </div>
                                           ) : (
                                             <button
-                                              onClick={() => generatePromptsForResult(res.id)}
+                                              onClick={() => generatePromptsForResult(res.id, [...selectedPrompts])}
                                               className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-xl text-xs font-black uppercase tracking-widest transition-all border border-emerald-500/20 active:scale-95"
                                             >
                                               <RefreshCw className="w-3 h-3" />
