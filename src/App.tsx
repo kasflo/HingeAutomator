@@ -1218,24 +1218,22 @@ export default function App() {
                       {isSearching ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4 group-hover:scale-110 transition-transform" />}
                       <span className="tracking-wide text-sm">Start Proxy Search</span>
                     </button>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => setOpenPanel('daisy')}
-                        className="flex-1 flex items-center gap-2 px-3 py-2.5 bg-blue-500/5 hover:bg-blue-500/10 border border-blue-500/15 hover:border-blue-500/25 rounded-2xl text-blue-400/60 hover:text-blue-400 text-xs font-bold uppercase tracking-widest transition-all group"
-                      >
-                        <Phone className="w-3 h-3 shrink-0" />
-                        <span>DaisySMS</span>
-                        <ChevronRight className="w-3 h-3 ml-auto opacity-40 group-hover:opacity-80 transition-opacity" />
-                      </button>
-                      <button
-                        onClick={() => setOpenPanel('prompts')}
-                        className="flex-1 flex items-center gap-2 px-3 py-2.5 bg-pink-500/5 hover:bg-pink-500/10 border border-pink-500/15 hover:border-pink-500/25 rounded-2xl text-pink-400/60 hover:text-pink-400 text-xs font-bold uppercase tracking-widest transition-all group"
-                      >
-                        <Heart className="w-3 h-3 shrink-0" />
-                        <span>Prompts</span>
-                        <ChevronRight className="w-3 h-3 ml-auto opacity-40 group-hover:opacity-80 transition-opacity" />
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => setOpenPanel('daisy')}
+                      className="w-full flex items-center gap-2 px-4 py-3 bg-blue-500/5 hover:bg-blue-500/10 border border-blue-500/15 hover:border-blue-500/25 rounded-2xl text-blue-400/60 hover:text-blue-400 text-xs font-bold uppercase tracking-widest transition-all group"
+                    >
+                      <Phone className="w-3.5 h-3.5" />
+                      <span>DaisySMS</span>
+                      <ChevronRight className="w-3.5 h-3.5 ml-auto opacity-40 group-hover:opacity-80 transition-opacity" />
+                    </button>
+                    <button
+                      onClick={() => setOpenPanel('prompts')}
+                      className="w-full flex items-center gap-2 px-4 py-3 bg-pink-500/5 hover:bg-pink-500/10 border border-pink-500/15 hover:border-pink-500/25 rounded-2xl text-pink-400/60 hover:text-pink-400 text-xs font-bold uppercase tracking-widest transition-all group"
+                    >
+                      <Heart className="w-3.5 h-3.5" />
+                      <span>Prompts</span>
+                      <ChevronRight className="w-3.5 h-3.5 ml-auto opacity-40 group-hover:opacity-80 transition-opacity" />
+                    </button>
                   </div>
                 </motion.div>
               ) : openPanel === 'daisy' ? (
@@ -1270,19 +1268,17 @@ export default function App() {
                       </button>
                     </div>
                   </div>
-                  {/* Quick nav: Proxy Settings at top */}
-                  <div className="px-5 pt-3">
+                  <div className="p-5 space-y-4 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 210px)' }}>
+                    {/* Quick nav: Proxy Settings at top */}
                     <button
                       onClick={() => setOpenPanel('proxy')}
-                      className="w-full flex items-center gap-2 px-3 py-2 bg-emerald-500/5 hover:bg-emerald-500/10 border border-emerald-500/15 hover:border-emerald-500/25 rounded-xl text-emerald-400/60 hover:text-emerald-400 text-xs font-bold uppercase tracking-widest transition-all group"
+                      className="w-full flex items-center gap-2 px-4 py-3 bg-emerald-500/5 hover:bg-emerald-500/10 border border-emerald-500/15 hover:border-emerald-500/25 rounded-2xl text-emerald-400/60 hover:text-emerald-400 text-xs font-bold uppercase tracking-widest transition-all group"
                     >
-                      <Shield className="w-3 h-3 shrink-0" />
+                      <Shield className="w-3.5 h-3.5" />
                       <span>Proxy Settings</span>
-                      <ChevronRight className="w-3 h-3 ml-auto opacity-40 group-hover:opacity-80 transition-opacity rotate-180" />
+                      <ChevronRight className="w-3.5 h-3.5 ml-auto opacity-40 group-hover:opacity-80 transition-opacity" />
                     </button>
-                  </div>
 
-                  <div className="p-5 space-y-4 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 250px)' }}>
                     {balance && (
                       <motion.div
                         initial={{ opacity: 0, y: -8 }}
@@ -1405,23 +1401,23 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Quick nav: Proxy + DaisySMS at top */}
-                  <div className="px-4 pt-3 flex gap-2">
+                  {/* Quick nav: Proxy Settings + DaisySMS at top */}
+                  <div className="px-5 pt-4 space-y-2">
                     <button
                       onClick={() => setOpenPanel('proxy')}
-                      className="flex-1 flex items-center gap-1.5 px-2.5 py-2 bg-emerald-500/5 hover:bg-emerald-500/10 border border-emerald-500/15 hover:border-emerald-500/25 rounded-xl text-emerald-400/60 hover:text-emerald-400 text-[10px] font-bold uppercase tracking-widest transition-all group"
+                      className="w-full flex items-center gap-2 px-4 py-3 bg-emerald-500/5 hover:bg-emerald-500/10 border border-emerald-500/15 hover:border-emerald-500/25 rounded-2xl text-emerald-400/60 hover:text-emerald-400 text-xs font-bold uppercase tracking-widest transition-all group"
                     >
-                      <ChevronRight className="w-2.5 h-2.5 rotate-180 shrink-0" />
-                      <Shield className="w-2.5 h-2.5 shrink-0" />
-                      <span>Proxy</span>
+                      <Shield className="w-3.5 h-3.5" />
+                      <span>Proxy Settings</span>
+                      <ChevronRight className="w-3.5 h-3.5 ml-auto opacity-40 group-hover:opacity-80 transition-opacity" />
                     </button>
                     <button
                       onClick={() => setOpenPanel('daisy')}
-                      className="flex-1 flex items-center gap-1.5 px-2.5 py-2 bg-blue-500/5 hover:bg-blue-500/10 border border-blue-500/15 hover:border-blue-500/25 rounded-xl text-blue-400/60 hover:text-blue-400 text-[10px] font-bold uppercase tracking-widest transition-all group"
+                      className="w-full flex items-center gap-2 px-4 py-3 bg-blue-500/5 hover:bg-blue-500/10 border border-blue-500/15 hover:border-blue-500/25 rounded-2xl text-blue-400/60 hover:text-blue-400 text-xs font-bold uppercase tracking-widest transition-all group"
                     >
-                      <ChevronRight className="w-2.5 h-2.5 rotate-180 shrink-0" />
-                      <Phone className="w-2.5 h-2.5 shrink-0" />
+                      <Phone className="w-3.5 h-3.5" />
                       <span>DaisySMS</span>
+                      <ChevronRight className="w-3.5 h-3.5 ml-auto opacity-40 group-hover:opacity-80 transition-opacity" />
                     </button>
                   </div>
 
