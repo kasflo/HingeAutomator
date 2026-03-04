@@ -1400,9 +1400,9 @@ export default function App() {
                       onClick={() => setOpenPanel('daisy')}
                       className="w-full flex items-center gap-1.5 px-3 py-2.5 bg-blue-500/5 hover:bg-blue-500/10 border border-blue-500/15 hover:border-blue-500/25 rounded-2xl text-blue-400/60 hover:text-blue-400 text-xs font-bold uppercase tracking-widest transition-all group"
                     >
-                      <ChevronRight className="w-3 h-3 rotate-180 shrink-0 opacity-60" />
                       <Phone className="w-3 h-3 shrink-0" />
                       <span>DaisySMS</span>
+                      <ChevronRight className="w-3 h-3 ml-auto shrink-0 opacity-40 group-hover:opacity-80 transition-opacity" />
                     </button>
                   </div>
 
