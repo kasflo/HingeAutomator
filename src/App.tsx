@@ -1218,22 +1218,24 @@ export default function App() {
                       {isSearching ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4 group-hover:scale-110 transition-transform" />}
                       <span className="tracking-wide text-sm">Start Proxy Search</span>
                     </button>
-                    <button
-                      onClick={() => setOpenPanel('daisy')}
-                      className="w-full flex items-center gap-2 px-4 py-3 bg-blue-500/5 hover:bg-blue-500/10 border border-blue-500/15 hover:border-blue-500/25 rounded-2xl text-blue-400/60 hover:text-blue-400 text-xs font-bold uppercase tracking-widest transition-all group"
-                    >
-                      <Phone className="w-3.5 h-3.5" />
-                      <span>DaisySMS</span>
-                      <ChevronRight className="w-3.5 h-3.5 ml-auto opacity-40 group-hover:opacity-80 transition-opacity" />
-                    </button>
-                    <button
-                      onClick={() => setOpenPanel('prompts')}
-                      className="w-full flex items-center gap-2 px-4 py-3 bg-pink-500/5 hover:bg-pink-500/10 border border-pink-500/15 hover:border-pink-500/25 rounded-2xl text-pink-400/60 hover:text-pink-400 text-xs font-bold uppercase tracking-widest transition-all group"
-                    >
-                      <Heart className="w-3.5 h-3.5" />
-                      <span>Prompts</span>
-                      <ChevronRight className="w-3.5 h-3.5 ml-auto opacity-40 group-hover:opacity-80 transition-opacity" />
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setOpenPanel('daisy')}
+                        className="flex-1 flex items-center gap-2 px-3 py-2.5 bg-blue-500/5 hover:bg-blue-500/10 border border-blue-500/15 hover:border-blue-500/25 rounded-2xl text-blue-400/60 hover:text-blue-400 text-xs font-bold uppercase tracking-widest transition-all group"
+                      >
+                        <Phone className="w-3 h-3 shrink-0" />
+                        <span>DaisySMS</span>
+                        <ChevronRight className="w-3 h-3 ml-auto opacity-40 group-hover:opacity-80 transition-opacity" />
+                      </button>
+                      <button
+                        onClick={() => setOpenPanel('prompts')}
+                        className="flex-1 flex items-center gap-2 px-3 py-2.5 bg-pink-500/5 hover:bg-pink-500/10 border border-pink-500/15 hover:border-pink-500/25 rounded-2xl text-pink-400/60 hover:text-pink-400 text-xs font-bold uppercase tracking-widest transition-all group"
+                      >
+                        <Heart className="w-3 h-3 shrink-0" />
+                        <span>Prompts</span>
+                        <ChevronRight className="w-3 h-3 ml-auto opacity-40 group-hover:opacity-80 transition-opacity" />
+                      </button>
+                    </div>
                   </div>
                 </motion.div>
               ) : openPanel === 'daisy' ? (
@@ -1401,36 +1403,16 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Quick nav: Proxy Settings + DaisySMS at top */}
-                  <div className="px-5 pt-4 space-y-2">
-                    <button
-                      onClick={() => setOpenPanel('proxy')}
-                      className="w-full flex items-center gap-2 px-4 py-3 bg-emerald-500/5 hover:bg-emerald-500/10 border border-emerald-500/15 hover:border-emerald-500/25 rounded-2xl text-emerald-400/60 hover:text-emerald-400 text-xs font-bold uppercase tracking-widest transition-all group"
-                    >
-                      <Shield className="w-3.5 h-3.5" />
-                      <span>Proxy Settings</span>
-                      <ChevronRight className="w-3.5 h-3.5 ml-auto opacity-40 group-hover:opacity-80 transition-opacity" />
-                    </button>
-                    <button
-                      onClick={() => setOpenPanel('daisy')}
-                      className="w-full flex items-center gap-2 px-4 py-3 bg-blue-500/5 hover:bg-blue-500/10 border border-blue-500/15 hover:border-blue-500/25 rounded-2xl text-blue-400/60 hover:text-blue-400 text-xs font-bold uppercase tracking-widest transition-all group"
-                    >
-                      <Phone className="w-3.5 h-3.5" />
-                      <span>DaisySMS</span>
-                      <ChevronRight className="w-3.5 h-3.5 ml-auto opacity-40 group-hover:opacity-80 transition-opacity" />
-                    </button>
-                  </div>
-
                   {/* Selected count hint */}
                   {selectedPrompts.length < 3 && (
-                    <div className="px-4 pt-2">
+                    <div className="px-5 pt-4">
                       <div className="text-[10px] font-bold uppercase tracking-widest text-amber-400/70 bg-amber-400/5 border border-amber-400/15 rounded-xl px-3 py-2">
                         Wähle genau 3 Prompts für die Generierung
                       </div>
                     </div>
                   )}
                   {selectedPrompts.length === 3 && (
-                    <div className="px-4 pt-2">
+                    <div className="px-5 pt-4">
                       <div className="text-[10px] font-bold uppercase tracking-widest text-pink-400/70 bg-pink-400/5 border border-pink-400/15 rounded-xl px-3 py-2 flex items-center gap-2">
                         <Sparkles className="w-3 h-3" />
                         Bereit für AI-Generierung
@@ -1439,7 +1421,7 @@ export default function App() {
                   )}
 
                   {/* Reset button */}
-                  <div className="px-4 pt-1.5">
+                  <div className="px-5 pt-2">
                     <button
                       onClick={() => setSelectedPrompts(["I go crazy for", "The way to win me over is", "A life goal of mine"])}
                       className="w-full text-[10px] font-bold uppercase tracking-widest text-zinc-600 hover:text-zinc-300 transition-colors text-left"
