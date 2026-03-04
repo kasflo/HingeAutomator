@@ -32,6 +32,9 @@ import {
   Ban,
   ShieldCheck,
   Users,
+  Sparkles,
+  Heart,
+  Check,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import axios from 'axios';
@@ -48,6 +51,112 @@ function cn(...inputs: ClassValue[]) {
 }
 
 const DEFAULT_DAISY_KEY = "Xwcfb3FpxPOvCqwK1lQx5L5BzBtxZm";
+
+const HINGE_PROMPTS_CATEGORIES = [
+  {
+    name: "About me",
+    color: "emerald",
+    prompts: [
+      "My greatest strength",
+      "My simple pleasures",
+      "A random fact I love is",
+      "My most irrational fear",
+      "A life goal of mine",
+      "Dating me is like",
+      "Typical Sunday",
+      "I recently discovered that",
+      "This year, I really want to",
+      "I go crazy for",
+      "The way to win me over is",
+      "Unusual skills",
+    ],
+  },
+  {
+    name: "Date vibes",
+    color: "pink",
+    prompts: [
+      "What I order for the table",
+      "Together, we could",
+      "The best way to ask me out is by",
+      "First round is on me if",
+      "I know the best spot in town for",
+    ],
+  },
+  {
+    name: "Getting personal",
+    color: "purple",
+    prompts: [
+      "You should *not* go out with me if",
+      "I won't shut up about",
+      "The dorkiest thing about me is",
+      "My Love Language is",
+      "What if I told you that",
+      "If loving this is wrong, I don't want to be right",
+      "Don't hate me if I",
+      "The one thing you should know about me is",
+      "The key to my heart is",
+      "I geek out on",
+    ],
+  },
+  {
+    name: "Let's chat about",
+    color: "blue",
+    prompts: [
+      "You should leave a comment if",
+      "Let's debate this topic",
+      "Teach me something about",
+      "Try to guess this about me",
+      "Change my mind about",
+      "Do you agree or disagree that",
+      "The one thing I'd love to know about you is",
+      "I bet you can't",
+      "Let's make sure we're on the same page about",
+      "I'll pick the topic if you start the conversation",
+      "Give me travel tips for",
+    ],
+  },
+  {
+    name: "My type",
+    color: "rose",
+    prompts: [
+      "The hallmark of a good relationship is",
+      "I'll fall for you if",
+      "We'll get along if",
+      "I'm looking for",
+      "I want someone who",
+      "Something that's non-negotiable for me is",
+      "I'll brag about you to my friends if",
+      "We're the same type of weird if",
+      "All I ask is that you",
+      "Green flags I look for",
+      "I'm weirdly attracted to",
+    ],
+  },
+  {
+    name: "Your World",
+    color: "amber",
+    prompts: [
+      "My most used emoji is",
+      "A song everyone should listen to",
+      "I'm convinced that",
+      "Two truths and a lie",
+      "Fact about me that surprises people",
+      "I'm looking for someone to share a",
+    ],
+  },
+  {
+    name: "Storytime",
+    color: "sky",
+    prompts: [
+      "The last thing I did for the first time was",
+      "The story behind my name is",
+      "My last great adventure was",
+      "One thing I'll never do again",
+      "Weirdest gift I've ever received",
+      "I got in trouble for",
+    ],
+  },
+];
 
 export default function App() {
   // --- Auth State ---
@@ -88,7 +197,11 @@ export default function App() {
   const [allEmails, setAllEmails] = useState<any[]>([]);
 
   // --- Sidebar Panel State (null = collapsed, shows icons only) ---
-  const [openPanel, setOpenPanel] = useState<'proxy' | 'daisy' | null>(null);
+  const [openPanel, setOpenPanel] = useState<'proxy' | 'daisy' | 'prompts' | null>(null);
+
+  // --- Selected Prompts State (exactly 3 for AI generation) ---
+  const DEFAULT_PROMPTS = ["I go crazy for", "The way to win me over is", "A life goal of mine"];
+  const [selectedPrompts, setSelectedPrompts] = useState<string[]>(DEFAULT_PROMPTS);
 
   // --- Fraud Check State ---
   const [fraudCheckingFor, setFraudCheckingFor] = useState<string | null>(null);
@@ -555,7 +668,7 @@ export default function App() {
       const nearbyPlace = nearby[Math.floor(Math.random() * nearby.length)] || result.city;
       const jobTitle = result.jobTitle || JOB_TITLES[Math.floor(Math.random() * JOB_TITLES.length)];
       setStatus("Generating Hinge prompts...");
-      const prompts = await generateHingePrompts({ city: result.city, nearbyPlace, job: jobTitle });
+      const prompts = await generateHingePrompts({ city: result.city, nearbyPlace, job: jobTitle, selectedPrompts });
       setResults(prev => prev.map(r => r.id === resultId ? {
         ...r,
         nearbyPlace: r.nearbyPlace || nearbyPlace,
@@ -969,7 +1082,7 @@ export default function App() {
 
           {/* ── Animated Sidebar ── */}
           <motion.aside
-            animate={{ width: openPanel !== null ? 292 : 64 }}
+            animate={{ width: openPanel !== null ? 292 : 68 }}
             transition={{ duration: 0.28, ease: [0.32, 0.72, 0, 1] }}
             className="shrink-0"
             style={{ overflow: 'hidden' }}
@@ -998,6 +1111,19 @@ export default function App() {
                     className="w-14 h-14 bg-zinc-900/60 backdrop-blur-2xl border border-white/10 rounded-2xl flex items-center justify-center text-blue-400 hover:bg-blue-500/10 hover:border-blue-500/30 shadow-xl transition-all active:scale-95 group"
                   >
                     <Phone className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                  </button>
+                  {/* Floating Prompts Logo */}
+                  <button
+                    onClick={() => setOpenPanel('prompts')}
+                    title="Prompt Selector"
+                    className="w-14 h-14 bg-zinc-900/60 backdrop-blur-2xl border border-white/10 rounded-2xl flex items-center justify-center text-pink-400 hover:bg-pink-500/10 hover:border-pink-500/30 shadow-xl transition-all active:scale-95 group relative"
+                  >
+                    <Heart className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                    {selectedPrompts.length > 0 && (
+                      <span className="absolute -top-1 -right-1 w-4 h-4 bg-pink-500 text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-lg shadow-pink-500/40">
+                        {selectedPrompts.length}
+                      </span>
+                    )}
                   </button>
                 </motion.div>
               ) : openPanel === 'proxy' ? (
@@ -1099,7 +1225,7 @@ export default function App() {
                     </button>
                   </div>
                 </motion.div>
-              ) : (
+              ) : openPanel === 'daisy' ? (
                 /* DaisySMS Panel */
                 <motion.div
                   key="daisy"
@@ -1218,6 +1344,138 @@ export default function App() {
                       <span>Proxy Settings</span>
                       <ChevronRight className="w-3.5 h-3.5 ml-auto opacity-40 group-hover:opacity-80 transition-opacity" />
                     </button>
+                  </div>
+                </motion.div>
+              ) : (
+                /* Prompts Panel */
+                <motion.div
+                  key="prompts"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.18, delay: 0.1 }}
+                  className="w-[292px] bg-zinc-900/60 backdrop-blur-2xl border border-white/10 rounded-3xl shadow-2xl overflow-hidden"
+                >
+                  {/* Header */}
+                  <div className="flex items-center gap-3 px-5 py-4 border-b border-white/5">
+                    <div className="w-8 h-8 bg-pink-500/20 rounded-lg flex items-center justify-center border border-pink-500/30 shrink-0">
+                      <Heart className="w-4 h-4 text-pink-400" />
+                    </div>
+                    <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-zinc-400 flex-1">Prompts</h2>
+                    <div className="flex items-center gap-2">
+                      <span className={cn(
+                        "text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider",
+                        selectedPrompts.length === 3
+                          ? "bg-pink-500/20 text-pink-400 border border-pink-500/30"
+                          : "bg-white/5 text-zinc-500 border border-white/10"
+                      )}>
+                        {selectedPrompts.length}/3
+                      </span>
+                      <button
+                        onClick={() => setOpenPanel(null)}
+                        className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 text-zinc-500 hover:text-white transition-all active:scale-95"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Selected count hint */}
+                  {selectedPrompts.length < 3 && (
+                    <div className="px-5 pt-3">
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-amber-400/70 bg-amber-400/5 border border-amber-400/15 rounded-xl px-3 py-2">
+                        Wähle genau 3 Prompts für die Generierung
+                      </div>
+                    </div>
+                  )}
+                  {selectedPrompts.length === 3 && (
+                    <div className="px-5 pt-3">
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-pink-400/70 bg-pink-400/5 border border-pink-400/15 rounded-xl px-3 py-2 flex items-center gap-2">
+                        <Sparkles className="w-3 h-3" />
+                        Bereit für AI-Generierung
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Reset button */}
+                  <div className="px-5 pt-3">
+                    <button
+                      onClick={() => setSelectedPrompts(["I go crazy for", "The way to win me over is", "A life goal of mine"])}
+                      className="w-full text-[10px] font-bold uppercase tracking-widest text-zinc-500 hover:text-zinc-300 transition-colors text-left"
+                    >
+                      ↺ Standard zurücksetzen
+                    </button>
+                  </div>
+
+                  {/* Categories + Prompts list */}
+                  <div className="p-4 space-y-4 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 260px)' }}>
+                    {HINGE_PROMPTS_CATEGORIES.map((cat) => {
+                      const colorMap: Record<string, string> = {
+                        emerald: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
+                        pink: "text-pink-400 bg-pink-500/10 border-pink-500/20",
+                        purple: "text-purple-400 bg-purple-500/10 border-purple-500/20",
+                        blue: "text-blue-400 bg-blue-500/10 border-blue-500/20",
+                        rose: "text-rose-400 bg-rose-500/10 border-rose-500/20",
+                        amber: "text-amber-400 bg-amber-500/10 border-amber-500/20",
+                        sky: "text-sky-400 bg-sky-500/10 border-sky-500/20",
+                      };
+                      const selectedBg: Record<string, string> = {
+                        emerald: "bg-emerald-500/15 border-emerald-500/40 text-emerald-300",
+                        pink: "bg-pink-500/15 border-pink-500/40 text-pink-300",
+                        purple: "bg-purple-500/15 border-purple-500/40 text-purple-300",
+                        blue: "bg-blue-500/15 border-blue-500/40 text-blue-300",
+                        rose: "bg-rose-500/15 border-rose-500/40 text-rose-300",
+                        amber: "bg-amber-500/15 border-amber-500/40 text-amber-300",
+                        sky: "bg-sky-500/15 border-sky-500/40 text-sky-300",
+                      };
+                      return (
+                        <div key={cat.name}>
+                          <div className={cn(
+                            "text-[9px] font-black uppercase tracking-[0.2em] px-2 py-1 rounded-lg border w-fit mb-2",
+                            colorMap[cat.color]
+                          )}>
+                            {cat.name}
+                          </div>
+                          <div className="space-y-1">
+                            {cat.prompts.map((prompt) => {
+                              const isSelected = selectedPrompts.includes(prompt);
+                              const isDisabled = !isSelected && selectedPrompts.length >= 3;
+                              return (
+                                <button
+                                  key={prompt}
+                                  disabled={isDisabled}
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      setSelectedPrompts(prev => prev.filter(p => p !== prompt));
+                                    } else if (selectedPrompts.length < 3) {
+                                      setSelectedPrompts(prev => [...prev, prompt]);
+                                    }
+                                  }}
+                                  className={cn(
+                                    "w-full text-left px-3 py-2 rounded-xl text-[11px] font-medium border transition-all flex items-center gap-2",
+                                    isSelected
+                                      ? selectedBg[cat.color]
+                                      : isDisabled
+                                      ? "text-zinc-700 bg-transparent border-zinc-800/50 cursor-not-allowed"
+                                      : "text-zinc-400 bg-transparent border-zinc-800 hover:border-zinc-600 hover:text-zinc-200 active:scale-[0.98]"
+                                  )}
+                                >
+                                  <span className={cn(
+                                    "w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-all",
+                                    isSelected
+                                      ? "bg-pink-500 border-pink-500"
+                                      : "border-zinc-700 bg-transparent"
+                                  )}>
+                                    {isSelected && <Check className="w-2.5 h-2.5 text-white" />}
+                                  </span>
+                                  <span className="leading-snug">{prompt}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </motion.div>
               )}

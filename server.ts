@@ -513,7 +513,7 @@ async function startServer() {
   // Claude AI endpoint for generating Hinge prompts
   app.post("/api/claude/generate-prompts", async (req, res) => {
     try {
-      const { city, nearbyPlace, job, apiKey } = req.body;
+      const { city, nearbyPlace, job, apiKey, selectedPrompts } = req.body;
 
       const resolvedKey = apiKey || process.env.ANTHROPIC_API_KEY;
       if (!resolvedKey) {
@@ -521,6 +521,16 @@ async function startServer() {
       }
 
       const anthropic = new Anthropic({ apiKey: resolvedKey });
+
+      // Use selectedPrompts if provided (exactly 3), else fall back to defaults
+      const prompts: string[] = (Array.isArray(selectedPrompts) && selectedPrompts.length === 3)
+        ? selectedPrompts
+        : ["I go crazy for", "The way to win me over is", "A life goal of mine"];
+
+      const promptListStr = prompts.map(p => `- ${p}`).join("\n");
+      const formatExampleStr = prompts.map(p =>
+        `${p}: <option>\n${p}: <option>\n${p}: <option>`
+      ).join("\n\n");
 
       const prompt = `du bist ich: 21–24, gen z, casual dating / hookup-coded (aber hinge-safe, nicht explizit).
 schreibe so, als wäre es schnell auf dem handy getippt: natürlich, leicht messy, nicht zu glatt, nicht "werbetext".
@@ -532,9 +542,7 @@ random_job: ${job}
 
 aufgabe:
 gib mir für diese 3 hinge prompts jeweils genau 3 optionen (insgesamt 9 optionen):
-- i go crazy for
-- the way to win me over
-- a life goal of mine
+${promptListStr}
 
 regeln:
 - alles all lower case
@@ -558,17 +566,7 @@ format (WICHTIG):
 genau 9 zeilen, ohne nummerierung.
 jede zeile startet exakt so:
 
-i go crazy for: <option>
-i go crazy for: <option>
-i go crazy for: <option>
-
-the way to win me over is: <option>
-the way to win me over is: <option>
-the way to win me over is: <option>
-
-a life goal of mine: <option>
-a life goal of mine: <option>
-a life goal of mine: <option>`;
+${formatExampleStr}`;
 
       const message = await anthropic.messages.create({
         model: "claude-sonnet-4-6",
@@ -578,24 +576,22 @@ a life goal of mine: <option>`;
 
       const text = message.content[0].type === "text" ? message.content[0].text : "";
 
-      const buckets: Record<string, string[]> = {
-        "i go crazy for": [],
-        "the way to win me over is": [],
-        "a life goal of mine": [],
-      };
+      // Dynamic parsing: match any of the selected prompts
+      const buckets: Record<string, string[]> = {};
+      for (const p of prompts) buckets[p] = [];
 
       text.split("\n").forEach(line => {
-        const lower = line.toLowerCase().trim();
-        if (lower.startsWith("i go crazy for:")) {
-          buckets["i go crazy for"].push(line.split(":")[1].trim());
-        } else if (lower.startsWith("the way to win me over is:")) {
-          buckets["the way to win me over is"].push(line.split(":")[1].trim());
-        } else if (lower.startsWith("a life goal of mine:")) {
-          buckets["a life goal of mine"].push(line.split(":")[1].trim());
+        const trimmed = line.trim();
+        for (const p of prompts) {
+          if (trimmed.toLowerCase().startsWith(p.toLowerCase() + ":")) {
+            const val = trimmed.slice(p.length + 1).trim();
+            if (val) buckets[p].push(val);
+            break;
+          }
         }
       });
 
-      console.log(`[Claude] Generated prompts for city: ${city}, job: ${job}`);
+      console.log(`[Claude] Generated prompts for city: ${city}, job: ${job}, prompts: ${prompts.join(", ")}`);
       res.json(buckets);
     } catch (error: any) {
       console.error("[Claude Error]", error.message);
